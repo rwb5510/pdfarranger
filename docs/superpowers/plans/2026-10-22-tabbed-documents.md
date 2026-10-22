@@ -65,7 +65,7 @@ These stay off `Document`: `about_dialog`, `on_action_preferences`, `on_action_f
   - `plan_launch(remote: bool, files: list[str], focused_occupied: bool) -> LaunchPlan`
   - `LaunchPlan.action` is `"fill"`, `"new_tab"`, or `"raise"`. `LaunchPlan.files` is a list of str.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_session.py`:
 
@@ -139,13 +139,13 @@ class LaunchPlanTests(unittest.TestCase):
         self.assertEqual(plan, LaunchPlan("new_tab", ["b.pdf", "c.pdf"]))
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session -v`
 
 Expected: FAIL with `ModuleNotFoundError` or `ImportError` for `pdfarranger.session`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `pdfarranger/session.py` with the project GPL header used by `pdfarranger/config.py`, then:
 
@@ -204,13 +204,13 @@ def plan_launch(remote: bool, files: list, focused_occupied: bool) -> LaunchPlan
     return LaunchPlan("new_tab", files)
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `python -m unittest tests.test_session -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/session.py tests/test_session.py
