@@ -247,7 +247,7 @@ git commit -m "Add pure rules for opening a document into a tab"
   - `attach(doc_id: int) -> None` (doc id was allocated by the source model; this model must accept that id and show it in the focused pane)
   - `visible_ids() -> set[int]`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -393,13 +393,13 @@ class WindowModelTests(unittest.TestCase):
         self.assertEqual(other.focused_id(), moving)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.WindowModelTests -v`
 
 Expected: FAIL with `ImportError` for `WindowModel`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Add to `pdfarranger/session.py`:
 
@@ -577,13 +577,13 @@ class WindowModel:
         self._place_in_focused_pane(doc_id)
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `python -m unittest tests.test_session -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/session.py tests/test_session.py
