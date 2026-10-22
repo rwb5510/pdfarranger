@@ -259,3 +259,40 @@ class SaveGateTests(unittest.TestCase):
         self.assertTrue(gate.can_start())
         self.assertIsNone(gate.busy_id)
 
+
+from pdfarranger.document import Document
+
+
+class _AppDirs:
+    def __init__(self):
+        self.tmp_dir = "/tmp/pdfarranger-test"
+        self.import_directory = None
+        self.export_directory = "/home/export"
+
+
+class DocumentShellTests(unittest.TestCase):
+    def test_two_documents_do_not_share_state(self):
+        app = _AppDirs()
+        first = Document(app, 1)
+        second = Document(app, 2)
+        first.pdfqueue.append("doc")
+        first.metadata["Title"] = "A"
+        first.find_text = "hello"
+        first.set_import_directory("/tmp/in")
+        self.assertEqual(second.pdfqueue, [])
+        self.assertEqual(second.metadata, {})
+        self.assertEqual(second.find_text, "")
+        self.assertEqual(second.import_directory, "/tmp/in")
+        self.assertTrue(first.occupied())
+        self.assertFalse(second.occupied())
+
+    def test_release_renderer_asks_the_thread_to_quit(self):
+        class Thread:
+            def __init__(self):
+                self.quit = False
+
+        doc = Document(_AppDirs(), 1)
+        doc.rendering_thread = Thread()
+        doc.release_renderer()
+        self.assertTrue(doc.rendering_thread.quit)
+

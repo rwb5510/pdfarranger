@@ -783,7 +783,7 @@ git commit -m "Add close, drop, and save-gate rules"
 - Consumes: nothing
 - Produces: `class Document` with independent `pdfqueue`, `metadata`, `save_file`, `is_unsaved`, `password`, `zoom_level`, `zoom_scale`, `zoom_fit`, `fit_one_page`, `find_text`, `id`, `app`, `gtk_window`. `occupied() -> bool` uses `document_occupied`. `release_renderer()` sets `rendering_thread.quit = True` when a thread exists. Properties `tmp_dir`, `import_directory`, and `export_directory` read and write `self.app`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -825,13 +825,13 @@ class DocumentShellTests(unittest.TestCase):
         self.assertTrue(doc.rendering_thread.quit)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.DocumentShellTests -v`
 
 Expected: FAIL with `ImportError` for `pdfarranger.document`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `pdfarranger/document.py` with the GPL header and:
 
@@ -918,13 +918,13 @@ class Document:
         return self.gtk_window
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS. `tests.test_core` does not need the new type and must stay green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/document.py tests/test_session.py
