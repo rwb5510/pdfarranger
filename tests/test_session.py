@@ -10,6 +10,14 @@ from pdfarranger.session import (
     tab_tooltip,
     Pane,
     WindowModel,
+    CloseOutcome,
+    DropSite,
+    PromptChoice,
+    SaveGate,
+    drop_target,
+    prompt_order,
+    resolve_prompts,
+    single_close,
 )
 
 
@@ -205,4 +213,49 @@ class WindowModelTests(unittest.TestCase):
         other.attach(moving)
         self.assertIn(moving, other.order)
         self.assertEqual(other.focused_id(), moving)
+
+
+class ClosePromptTests(unittest.TestCase):
+    def test_prompt_order_asks_the_focused_document_first(self):
+        self.assertEqual(prompt_order(2, [1, 2, 3], [1, 2, 3]), [2, 1, 3])
+
+    def test_cancel_aborts_before_anything_closes(self):
+        outcome = resolve_prompts(
+            [2, 1],
+            [PromptChoice.SAVE, PromptChoice.CANCEL],
+        )
+        self.assertEqual(outcome, CloseOutcome(True, [], []))
+
+    def test_saves_run_before_discards_are_recorded(self):
+        outcome = resolve_prompts(
+            [2, 1, 3],
+            [PromptChoice.DISCARD, PromptChoice.SAVE, PromptChoice.DISCARD],
+        )
+        self.assertEqual(outcome, CloseOutcome(False, [1], [2, 3]))
+
+    def test_single_close_answers(self):
+        self.assertEqual(single_close(PromptChoice.SAVE), "save_then_close")
+        self.assertEqual(single_close(PromptChoice.DISCARD), "discard")
+        self.assertEqual(single_close(PromptChoice.CANCEL), "abort")
+
+
+class DropTargetTests(unittest.TestCase):
+    def test_drop_site_selects_the_document(self):
+        self.assertEqual(drop_target(DropSite.PANE, 4, 5, 6), 4)
+        self.assertEqual(drop_target(DropSite.TAB, 4, 5, 6), 5)
+        self.assertEqual(drop_target(DropSite.WINDOW, None, None, 6), 6)
+
+
+class SaveGateTests(unittest.TestCase):
+    def test_only_one_save_runs(self):
+        gate = SaveGate()
+        self.assertTrue(gate.can_start())
+        gate.start(3)
+        self.assertFalse(gate.can_start())
+        self.assertEqual(gate.busy_id, 3)
+        with self.assertRaises(RuntimeError):
+            gate.start(4)
+        gate.finish()
+        self.assertTrue(gate.can_start())
+        self.assertIsNone(gate.busy_id)
 

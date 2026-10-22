@@ -240,3 +240,78 @@ class WindowModel:
         self.next_id = max(self.next_id, doc_id + 1)
         self._place_in_focused_pane(doc_id)
 
+
+class PromptChoice(Enum):
+    SAVE = "save"
+    DISCARD = "discard"
+    CANCEL = "cancel"
+
+
+@dataclass(frozen=True)
+class CloseOutcome:
+    aborted: bool
+    save_ids: list
+    discard_ids: list
+
+
+def prompt_order(focused_id: int, unsaved_ids: list, tab_order: list) -> list:
+    unsaved = set(unsaved_ids)
+    ordered = [doc_id for doc_id in tab_order if doc_id in unsaved and doc_id != focused_id]
+    if focused_id in unsaved:
+        return [focused_id] + ordered
+    return ordered
+
+
+def resolve_prompts(order: list, answers: list) -> CloseOutcome:
+    if len(order) != len(answers):
+        raise ValueError("one answer per document")
+    if any(answer is PromptChoice.CANCEL for answer in answers):
+        return CloseOutcome(True, [], [])
+    save_ids = [doc_id for doc_id, answer in zip(order, answers) if answer is PromptChoice.SAVE]
+    discard_ids = [doc_id for doc_id, answer in zip(order, answers) if answer is PromptChoice.DISCARD]
+    return CloseOutcome(False, save_ids, discard_ids)
+
+
+def single_close(answer: PromptChoice) -> str:
+    if answer is PromptChoice.SAVE:
+        return "save_then_close"
+    if answer is PromptChoice.DISCARD:
+        return "discard"
+    if answer is PromptChoice.CANCEL:
+        return "abort"
+    raise ValueError(answer)
+
+
+class DropSite(Enum):
+    PANE = "pane"
+    TAB = "tab"
+    WINDOW = "window"
+
+
+def drop_target(site: DropSite, pane_doc, tab_doc, focused_id: int) -> int:
+    if site is DropSite.PANE:
+        if pane_doc is None:
+            raise ValueError("pane drop needs a document")
+        return pane_doc
+    if site is DropSite.TAB:
+        if tab_doc is None:
+            raise ValueError("tab drop needs a document")
+        return tab_doc
+    return focused_id
+
+
+class SaveGate:
+    def __init__(self):
+        self.busy_id = None
+
+    def can_start(self) -> bool:
+        return self.busy_id is None
+
+    def start(self, doc_id: int) -> None:
+        if self.busy_id is not None:
+            raise RuntimeError("a save is already running")
+        self.busy_id = doc_id
+
+    def finish(self) -> None:
+        self.busy_id = None
+

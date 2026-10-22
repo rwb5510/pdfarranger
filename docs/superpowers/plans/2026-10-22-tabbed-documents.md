@@ -610,7 +610,7 @@ git commit -m "Add the window model for tabs and two panes"
   - `drop_target(site: DropSite, pane_doc: int | None, tab_doc: int | None, focused_id: int) -> int`
   - `class SaveGate` with `can_start() -> bool`, `start(doc_id: int) -> None`, `finish() -> None`, `busy_id -> int | None`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -672,13 +672,13 @@ class SaveGateTests(unittest.TestCase):
         self.assertIsNone(gate.busy_id)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.ClosePromptTests tests.test_session.DropTargetTests tests.test_session.SaveGateTests -v`
 
 Expected: FAIL with `ImportError`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Add to `pdfarranger/session.py`:
 
@@ -758,13 +758,13 @@ class SaveGate:
         self.busy_id = None
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `python -m unittest tests.test_session -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/session.py tests/test_session.py
