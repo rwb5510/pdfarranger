@@ -522,6 +522,8 @@ class PdfArrangerCommandLineTests(unittest.TestCase):
         self.app.activate = lambda: setattr(self, 'activated', True)
 
     def tearDown(self):
+        if getattr(self.app, 'handoff', None):
+            self.app.handoff.stop()
         if hasattr(self.app, 'tmp_dir') and os.path.isdir(self.app.tmp_dir):
             import shutil
             shutil.rmtree(self.app.tmp_dir, ignore_errors=True)
@@ -632,4 +634,149 @@ class PdfArrangerCommandLineTests(unittest.TestCase):
         self.assertFalse(self.activated)
         self.assertEqual(win.opened, [["/remote/remote.pdf"]])
         self.assertTrue(win.presented)
+
+    def test_do_command_line_win32ipc_submits_without_activating(self):
+        class FakeFile:
+            def __init__(self, path):
+                self._path = path
+
+            def get_path(self):
+                return self._path
+
+        class FakeOptions:
+            def contains(self, key):
+                return False
+
+            def lookup_value(self, key):
+                return ["client.pdf"]
+
+        class FakeCommandLine:
+            def get_options_dict(self):
+                return FakeOptions()
+
+            def create_file_for_arg(self, arg):
+                return FakeFile("/submitted/" + arg)
+
+            def get_is_remote(self):
+                return False
+
+        with patch("pdfarranger.pdfarranger.gtk_unique_is_enough", return_value=False):
+            with patch("pdfarranger.pdfarranger.Win32Handoff.submit", return_value=True) as mock_submit:
+                ret = self.app.do_command_line(FakeCommandLine())
+                self.assertEqual(ret, 0)
+                mock_submit.assert_called_once_with(["/submitted/client.pdf"])
+                self.assertFalse(self.activated)
+
+    def test_do_command_line_win32ipc_starts_handoff_when_primary(self):
+        class FakeFile:
+            def __init__(self, path):
+                self._path = path
+
+            def get_path(self):
+                return self._path
+
+        class FakeOptions:
+            def contains(self, key):
+                return False
+
+            def lookup_value(self, key):
+                return ["first.pdf"]
+
+        class FakeCommandLine:
+            def get_options_dict(self):
+                return FakeOptions()
+
+            def create_file_for_arg(self, arg):
+                return FakeFile("/primary/" + arg)
+
+            def get_is_remote(self):
+                return False
+
+        with patch("pdfarranger.pdfarranger.gtk_unique_is_enough", return_value=False):
+            with patch("pdfarranger.pdfarranger.Win32Handoff.submit", return_value=False):
+                with patch("pdfarranger.pdfarranger.Win32Handoff.start") as mock_start:
+                    win = self.FakeWindow(occupied=False)
+                    self.app.activate = lambda: self.app.windows.append(win)
+                    ret = self.app.do_command_line(FakeCommandLine())
+                    self.assertEqual(ret, 0)
+                    mock_start.assert_called_once()
+                    self.assertIsNotNone(self.app.handoff)
+                    self.assertEqual(win.opened, [["/primary/first.pdf"]])
+
+
+
+import socket
+import tempfile
+import threading
+from unittest.mock import patch
+
+from pdfarranger.win32ipc import (
+    Win32Handoff,
+    decode_files,
+    default_lock_dir,
+    encode_files,
+    gtk_unique_is_enough,
+)
+
+
+class GtkUniqueCheckTests(unittest.TestCase):
+    def test_env_var_forces_fallback(self):
+        with patch.dict(os.environ, {"PDFARRANGER_WIN32_IPC": "1"}):
+            self.assertFalse(gtk_unique_is_enough())
+
+    def test_non_windows_defaults_to_true(self):
+        with patch.dict(os.environ, {}, clear=False):
+            if "PDFARRANGER_WIN32_IPC" in os.environ:
+                del os.environ["PDFARRANGER_WIN32_IPC"]
+            with patch("pdfarranger.win32ipc.os.name", "posix"):
+                self.assertTrue(gtk_unique_is_enough())
+
+    def test_windows_glib_version_check(self):
+        class FakeGLib:
+            def __init__(self, major, minor):
+                self.MAJOR_VERSION = major
+                self.MINOR_VERSION = minor
+
+        with patch.dict(os.environ, {}, clear=False):
+            if "PDFARRANGER_WIN32_IPC" in os.environ:
+                del os.environ["PDFARRANGER_WIN32_IPC"]
+            with patch("pdfarranger.win32ipc.os.name", "nt"):
+                with patch("pdfarranger.win32ipc.GLib", FakeGLib(2, 42)):
+                    self.assertFalse(gtk_unique_is_enough())
+                with patch("pdfarranger.win32ipc.GLib", FakeGLib(2, 44)):
+                    self.assertTrue(gtk_unique_is_enough())
+                with patch("pdfarranger.win32ipc.GLib", FakeGLib(3, 0)):
+                    self.assertTrue(gtk_unique_is_enough())
+                with patch("pdfarranger.win32ipc.GLib", None):
+                    self.assertFalse(gtk_unique_is_enough())
+
+
+class Win32HandoffTests(unittest.TestCase):
+    def test_round_trip_message(self):
+        self.assertEqual(decode_files(encode_files(["a.pdf", "b.pdf"])), ["a.pdf", "b.pdf"])
+
+    def test_second_client_delivers_files_to_the_first_server(self):
+        received = []
+        ready = threading.Event()
+        handoff = Win32Handoff(lambda files: received.append(files), ready.set)
+        handoff.start()
+        self.assertTrue(ready.wait(2))
+        self.assertTrue(handoff.submit(["second.pdf"]))
+        handoff.wait_idle(2)
+        handoff.stop()
+        self.assertEqual(received, [["second.pdf"]])
+
+    def test_submit_returns_false_when_no_server_running(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertFalse(Win32Handoff.submit(["missing.pdf"], directory=tmpdir))
+
+    def test_stale_lock_file_cleaned_up_on_failed_connect(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_file = os.path.join(tmpdir, "instance.port")
+            with open(lock_file, "w", encoding="utf-8") as f:
+                f.write("127.0.0.1:59999\n")
+            self.assertFalse(Win32Handoff.submit(["doc.pdf"], directory=tmpdir))
+            self.assertFalse(os.path.exists(lock_file))
+
+
 

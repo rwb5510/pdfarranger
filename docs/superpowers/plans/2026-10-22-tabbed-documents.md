@@ -1339,7 +1339,7 @@ git commit -m "Hand a second launch to the running window"
   - `class Win32Handoff` with `start(callback)`, `submit(files: list[str]) -> bool`, `stop()`
   - `callback` is `callable(list[str])` and runs on the GLib main loop via `GLib.idle_add`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -1366,13 +1366,13 @@ class Win32HandoffTests(unittest.TestCase):
         self.assertEqual(received, [["second.pdf"]])
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.Win32HandoffTests -v`
 
 Expected: FAIL with `ImportError`.
 
-- [ ] **Step 3: Implement the socket handoff**
+- [x] **Step 3: Implement the socket handoff**
 
 `encode_files` / `decode_files` use `json.dumps` / `json.loads` of a list of strings, framed as one line ending in `\n`.
 
@@ -1396,13 +1396,13 @@ When `gtk_unique_is_enough()` is false:
 
 Linux and macOS do not construct `Win32Handoff` unless the env var is set. The unit test constructs it directly, so it runs on Windows too.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `python -m unittest tests.test_session.Win32HandoffTests tests.test_session.CommandLineRoutingTests -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/win32ipc.py pdfarranger/pdfarranger.py tests/test_session.py

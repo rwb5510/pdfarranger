@@ -197,6 +197,7 @@ _ = gettext.gettext
 from .session import plan_launch
 from .document import Document
 from .window import ArrangerWindow
+from .win32ipc import Win32Handoff, gtk_unique_is_enough
 
 try:
     from . import undo
@@ -328,6 +329,7 @@ class PdfArranger(ApplicationBase):
         self.windows = []
         self.last_focused_window = None
         self._next_doc_id = 0
+        self.handoff = None
 
         self.export_directory = os.path.expanduser('~')
         self.import_directory = None
@@ -562,6 +564,13 @@ class PdfArranger(ApplicationBase):
                 if path:
                     files.append(path)
 
+        if not gtk_unique_is_enough():
+            if Win32Handoff.submit(files):
+                return 0
+            if self.handoff is None:
+                self.handoff = Win32Handoff(lambda fs: self.open_launched_files(True, fs))
+                self.handoff.start()
+
         if not self.get_windows():
             self.activate()
 
@@ -598,6 +607,9 @@ class PdfArranger(ApplicationBase):
     def close_application(self, _widget=None, _event=None, _data=None):
         """Termination"""
         self.quit_flag.set()
+        if self.handoff:
+            self.handoff.stop()
+            self.handoff = None
         for window in list(self.windows):
             for doc in list(window.docs.values()):
                 doc.release_renderer()
