@@ -14,49 +14,67 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-from gi.repository import Gtk, Gdk
+try:
+    import gi
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import Gtk, Gdk
+except (ImportError, ValueError):
+    Gtk = None
+    Gdk = None
+
 import gettext
 
-from .core import Sides
-from .exporter import get_in_memory_poppler_doc
+try:
+    from .core import Sides
+    from .exporter import get_in_memory_poppler_doc
+except (ImportError, ValueError):
+    Sides = None
+    get_in_memory_poppler_doc = None
 
 _ = gettext.gettext
 
+_BaseClass = Gtk.SearchBar if Gtk is not None else object
 
-class SearchBarWidget(Gtk.SearchBar):
+
+class SearchBarWidget(_BaseClass):
     """A widget for searching of text in PDF"""
-    def __init__(self, window, iconview, pdfqueue, show_find_results, clear_find_results):
-        super().__init__(show_close_button=True)
-        self.button_box = Gtk.Box(homogeneous=True, halign=Gtk.Align.START, margin_start=6)
+    def __init__(self, window=None, iconview=None, pdfqueue=None, show_find_results=None, clear_find_results=None):
+        if Gtk is not None:
+            super().__init__(show_close_button=True)
+            self.button_box = Gtk.Box(homogeneous=True, halign=Gtk.Align.START, margin_start=6)
 
-        button_prev = Gtk.Button.new_from_icon_name('go-up-symbolic', True)
-        button_prev.set_tooltip_text(_("Find Previous"))
-        button_prev.connect('clicked', self.find_sequent, -1)
-        self.button_box.pack_start(button_prev, True, True, 0)
+            button_prev = Gtk.Button.new_from_icon_name('go-up-symbolic', True)
+            button_prev.set_tooltip_text(_("Find Previous"))
+            button_prev.connect('clicked', self.find_sequent, -1)
+            self.button_box.pack_start(button_prev, True, True, 0)
 
-        button_next = Gtk.Button.new_from_icon_name('go-down-symbolic', True)
-        button_next.set_tooltip_text(_("Find Next"))
-        button_next.connect('clicked', self.find_sequent, 1)
-        self.button_box.pack_start(button_next, True, True, 0)
+            button_next = Gtk.Button.new_from_icon_name('go-down-symbolic', True)
+            button_next.set_tooltip_text(_("Find Next"))
+            button_next.connect('clicked', self.find_sequent, 1)
+            self.button_box.pack_start(button_next, True, True, 0)
 
-        button_all = Gtk.Button(label=_("All"))
-        button_all.set_tooltip_text(_("Find All"))
-        button_all.connect('clicked', self.find_all)
-        self.button_box.pack_start(button_all, True, True, 0)
+            button_all = Gtk.Button(label=_("All"))
+            button_all.set_tooltip_text(_("Find All"))
+            button_all.connect('clicked', self.find_all)
+            self.button_box.pack_start(button_all, True, True, 0)
 
-        self.entry = Gtk.SearchEntry(width_chars=32)
-        self.entry.connect('search_changed', self.enable_actions)
-        entry_tools = Gtk.Box()
-        entry_tools.pack_start(self.entry, True, True, 0)
-        entry_tools.pack_start(self.button_box, True, True, 0)
-        entry_tools.connect('unmap', self.close)
+            self.entry = Gtk.SearchEntry(width_chars=32)
+            self.entry.connect('search_changed', self.enable_actions)
+            entry_tools = Gtk.Box()
+            entry_tools.pack_start(self.entry, True, True, 0)
+            entry_tools.pack_start(self.button_box, True, True, 0)
+            entry_tools.connect('unmap', self.close)
 
-        self.add(entry_tools)
-        self.connect_entry(self.entry)
+            self.add(entry_tools)
+            self.connect_entry(self.entry)
+        else:
+            self.button_box = None
+            self.entry = None
+
         self.window = window
         self.iconview = iconview
-        self.pdfqueue = pdfqueue
-        self.model = self.iconview.get_model()
+        self.pdfqueue = pdfqueue if pdfqueue is not None else []
+        self.model = self.iconview.get_model() if self.iconview is not None else None
         self.show_find_results = show_find_results
         self.clear_find_results = clear_find_results
         self.text_old = ""
@@ -66,13 +84,46 @@ class SearchBarWidget(Gtk.SearchBar):
         self.nrect = 0
         self.event_cnt = 0
 
+    def bind_document(self, document) -> None:
+        if document is None:
+            self.iconview = None
+            self.model = None
+            self.pdfqueue = []
+            self.show_find_results = None
+            self.clear_find_results = None
+            self.page = None
+            self.rectangles = []
+            self.nrect = 0
+            self.text_old = ""
+            if hasattr(self, 'entry') and self.entry is not None:
+                self.entry.set_text("")
+            return
+        self.iconview = getattr(document, 'iconview', None)
+        self.pdfqueue = getattr(document, 'pdfqueue', [])
+        self.model = getattr(document, 'model', None) or (self.iconview.get_model() if (self.iconview and hasattr(self.iconview, 'get_model')) else None)
+        self.show_find_results = getattr(document, 'show_find_results', None)
+        self.clear_find_results = getattr(document, 'clear_find_results', None)
+        self.page = None
+        self.rectangles = []
+        self.nrect = 0
+        find_text = getattr(document, 'find_text', '') or ''
+        self.text_old = find_text
+        if hasattr(self, 'entry') and self.entry is not None:
+            self.entry.set_text(find_text)
+
     def reveal(self):
-        if not self.get_search_mode():
-            self.entry.set_text(self.text_old)
-            self.entry.grab_focus()
-            self.set_search_mode(True)
+        if hasattr(self, 'get_search_mode'):
+            if not self.get_search_mode():
+                if self.entry:
+                    self.entry.set_text(self.text_old)
+                    self.entry.grab_focus()
+                self.set_search_mode(True)
+            else:
+                if self.entry:
+                    self.entry.grab_focus_without_selecting()
         else:
-            self.entry.grab_focus_without_selecting()
+            if self.entry:
+                self.entry.set_text(self.text_old)
 
     def handle_event(self, event):
         """Forward key press events to entry"""
@@ -98,12 +149,16 @@ class SearchBarWidget(Gtk.SearchBar):
         return handled
 
     def enable_actions(self, _widget=None):
-        enable = (self.entry.get_text() and self.get_search_mode() or
-                  self.text_old and not self.get_search_mode())
-        self.button_box.set_sensitive(enable)
-        self.window.lookup_action("find_prev").set_enabled(enable)
-        self.window.lookup_action("find_next").set_enabled(enable)
-        self.window.lookup_action("find_all").set_enabled(enable)
+        search_mode = self.get_search_mode() if hasattr(self, 'get_search_mode') else True
+        entry_text = self.entry.get_text() if hasattr(self, 'entry') and self.entry is not None else ""
+        enable = bool((entry_text and search_mode) or (self.text_old and not search_mode))
+        if hasattr(self, 'button_box') and self.button_box:
+            self.button_box.set_sensitive(enable)
+        if self.window and hasattr(self.window, 'lookup_action'):
+            for act_name in ("find_prev", "find_next", "find_all"):
+                act = self.window.lookup_action(act_name)
+                if act and hasattr(act, 'set_enabled'):
+                    act.set_enabled(enable)
 
     def find(self, _action, _option, _unknown):
         self.reveal()
@@ -117,30 +172,33 @@ class SearchBarWidget(Gtk.SearchBar):
     def find_all(self, _widget, _option=None, _unknown=None):
         self.event_cnt += 1
         event_cnt = self.event_cnt
-        if len(self.model) == 0:
+        if not self.model or len(self.model) == 0:
             return
         self.reveal()
-        self.clear_find_results(unselect_all=True)
-        text = self.entry.get_text()
+        if self.clear_find_results:
+            self.clear_find_results(unselect_all=True)
+        text = self.entry.get_text() if hasattr(self, 'entry') and self.entry is not None else ""
         if text == "":
             return
         for npage in range(len(self.model)):
             rectangles = self.find_text(npage, text)
-            if len(rectangles) > 0:
+            if len(rectangles) > 0 and self.show_find_results:
                 self.show_find_results(npage, rectangles)
-            self.entry.set_progress_fraction((npage + 1) / max(1, len(self.model)))
+            if hasattr(self.entry, 'set_progress_fraction'):
+                self.entry.set_progress_fraction((npage + 1) / max(1, len(self.model)))
             if self.abort(event_cnt):
                 break
-        self.entry.set_progress_fraction(1)
-        self.entry.set_progress_fraction(0)
+        if hasattr(self.entry, 'set_progress_fraction'):
+            self.entry.set_progress_fraction(1)
+            self.entry.set_progress_fraction(0)
 
     def find_sequent(self, _widget=None, step=1):
         self.event_cnt += 1
         event_cnt = self.event_cnt
-        if len(self.model) == 0:
+        if not self.model or len(self.model) == 0:
             return
         self.reveal()
-        selection = self.iconview.get_selected_items()
+        selection = self.iconview.get_selected_items() if self.iconview else []
         if len(selection) > 0:
             self.npage = selection[-1].get_indices()[0]
         self.npage = min(self.npage, len(self.model) - 1)
@@ -229,12 +287,14 @@ class SearchBarWidget(Gtk.SearchBar):
         return rectangles
 
     def abort(self, event_cnt):
-        while Gtk.events_pending():
-            Gtk.main_iteration()
-        closed = not self.get_search_mode()
-        cleared = not self.entry.get_text()
+        if Gtk is not None:
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+        closed = not self.get_search_mode() if hasattr(self, 'get_search_mode') else False
+        cleared = not (self.entry.get_text() if hasattr(self, 'entry') and self.entry is not None else "")
         old_event = self.event_cnt > event_cnt
         return closed or cleared or old_event
 
-    def close(self, _widget):
-        self.clear_find_results(unselect_all=False)
+    def close(self, _widget=None):
+        if self.clear_find_results:
+            self.clear_find_results(unselect_all=False)

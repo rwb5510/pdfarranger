@@ -1534,3 +1534,120 @@ class QuitAllTests(unittest.TestCase):
         self.assertEqual(len(app.windows), 0)
 
 
+class FindTextMemoryTests(unittest.TestCase):
+    def test_each_document_keeps_its_query(self):
+        app = _AppDirs()
+        first = Document(app, 1)
+        second = Document(app, 2)
+        first.find_text = "alpha"
+        second.find_text = "beta"
+        self.assertEqual(first.find_text, "alpha")
+        self.assertEqual(second.find_text, "beta")
+
+    def test_searchbar_bind_document_wires_attributes_and_entry(self):
+        from pdfarranger.search import SearchBarWidget
+
+        class DummyEntry:
+            def __init__(self):
+                self.text = ""
+            def set_text(self, text):
+                self.text = text
+            def get_text(self):
+                return self.text
+
+        app = _AppDirs()
+        doc = Document(app, 1)
+        doc.iconview = "mock_iconview"
+        doc.pdfqueue = ["file1.pdf"]
+        doc.show_find_results = lambda n, r: "show"
+        doc.clear_find_results = lambda u: "clear"
+        doc.find_text = "needle"
+
+        searchbar = SearchBarWidget(None, None, [], None, None)
+        searchbar.entry = DummyEntry()
+        searchbar.bind_document(doc)
+
+        self.assertEqual(searchbar.iconview, "mock_iconview")
+        self.assertEqual(searchbar.pdfqueue, ["file1.pdf"])
+        self.assertEqual(searchbar.show_find_results(0, []), "show")
+        self.assertEqual(searchbar.clear_find_results(False), "clear")
+        self.assertEqual(searchbar.entry.get_text(), "needle")
+
+    def test_searchbar_bind_document_none(self):
+        from pdfarranger.search import SearchBarWidget
+
+        class DummyEntry:
+            def __init__(self):
+                self.text = "something"
+            def set_text(self, text):
+                self.text = text
+            def get_text(self):
+                return self.text
+
+        searchbar = SearchBarWidget(None, None, [], None, None)
+        searchbar.entry = DummyEntry()
+        searchbar.iconview = "mock"
+        searchbar.pdfqueue = ["file"]
+        searchbar.bind_document(None)
+
+        self.assertIsNone(searchbar.iconview)
+        self.assertEqual(searchbar.pdfqueue, [])
+        self.assertEqual(searchbar.entry.get_text(), "")
+
+    def test_show_model_persists_previous_query_and_switches(self):
+        from pdfarranger.pdfarranger import PdfArranger
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.search import SearchBarWidget
+
+        class DummyEntry:
+            def __init__(self):
+                self.text = ""
+            def set_text(self, text):
+                self.text = text
+            def get_text(self):
+                return self.text
+
+        app = PdfArranger()
+        win = ArrangerWindow(app)
+        doc1_id = win.model.focused_id()
+        doc1 = win.docs[doc1_id]
+        doc1.find_text = "query1"
+
+        doc2_id = win.model.new_tab()
+        doc2 = Document(app, doc2_id)
+        doc2.find_text = "query2"
+        win.docs[doc2_id] = doc2
+
+        searchbar = SearchBarWidget(None, None, [], None, None)
+        searchbar.entry = DummyEntry()
+        win.searchbar_widget = searchbar
+
+        # Initial focus on doc1
+        win.model.click_tab(doc1_id)
+        win.show_model()
+        self.assertEqual(searchbar.entry.get_text(), "query1")
+
+        # User edits query for doc1
+        searchbar.entry.set_text("edited query 1")
+
+        # Switch focus to doc2
+        win.model.click_tab(doc2_id)
+        win.show_model()
+
+        # Previous doc (doc1) saved query, and searchbar loaded doc2 query
+        self.assertEqual(doc1.find_text, "edited query 1")
+        self.assertEqual(searchbar.entry.get_text(), "query2")
+
+        # User edits query for doc2
+        searchbar.entry.set_text("edited query 2")
+
+        # Switch focus back to doc1
+        win.model.click_tab(doc1_id)
+        win.show_model()
+
+        # Doc2 query saved, doc1 query restored
+        self.assertEqual(doc2.find_text, "edited query 2")
+        self.assertEqual(searchbar.entry.get_text(), "edited query 1")
+
+
+

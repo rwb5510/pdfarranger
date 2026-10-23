@@ -109,6 +109,7 @@ class ArrangerWindow:
         self.tab_strip_box = None
         self.page_area = None
         self.searchbar_widget = None
+        self._bound_doc_id = None
         self.main_menu = None
         self.actions = []
         self.popup = None
@@ -573,6 +574,25 @@ class ArrangerWindow:
                         style_ctx.remove_class("focused-pane")
 
     def show_model(self):
+        focused = self.focused_document()
+        if hasattr(self, 'searchbar_widget') and self.searchbar_widget:
+            new_doc_id = focused.id if focused else None
+            if self._bound_doc_id is not None and self._bound_doc_id != new_doc_id:
+                prev_doc = self.docs.get(self._bound_doc_id)
+                if prev_doc is not None and hasattr(self.searchbar_widget, 'entry') and self.searchbar_widget.entry is not None:
+                    prev_doc.find_text = self.searchbar_widget.entry.get_text() or ""
+            if focused is not None and self._bound_doc_id != focused.id:
+                if hasattr(self.searchbar_widget, 'bind_document'):
+                    self.searchbar_widget.bind_document(focused)
+                else:
+                    self.searchbar_widget.iconview = focused.iconview
+                    self.searchbar_widget.pdfqueue = focused.pdfqueue
+                self._bound_doc_id = focused.id
+            elif focused is None:
+                if hasattr(self.searchbar_widget, 'bind_document'):
+                    self.searchbar_widget.bind_document(None)
+                self._bound_doc_id = None
+
         if Gtk is None:
             return
         # Sync tab order in tab_strip_box
@@ -603,7 +623,6 @@ class ArrangerWindow:
                 if len(doc.model) > 0:
                     doc.silent_render()
 
-        focused = self.focused_document()
         if focused:
             self.retitle()
             if focused.undomanager and self.window:
@@ -611,9 +630,6 @@ class ArrangerWindow:
                     self.window.lookup_action('undo'),
                     self.window.lookup_action('redo')
                 )
-            if hasattr(self, 'searchbar_widget') and self.searchbar_widget:
-                self.searchbar_widget.iconview = focused.iconview
-                self.searchbar_widget.pdfqueue = focused.pdfqueue
             focused.update_statusbar()
             focused.iv_selection_changed()
 
@@ -712,6 +728,8 @@ class ArrangerWindow:
                     _lbl, tab_box = self.tab_widgets.pop(doc_id)
                     if tab_box.get_parent():
                         tab_box.get_parent().remove(tab_box)
+            if self._bound_doc_id == doc_id:
+                self._bound_doc_id = None
             self.show_model()
 
     def close_window(self) -> bool:
@@ -767,6 +785,7 @@ class ArrangerWindow:
                 doc.release_renderer()
         self.docs.clear()
         self.tab_widgets.clear()
+        self._bound_doc_id = None
         if hasattr(self.app, 'close_window'):
             self.app.close_window(self)
         elif self.window:
@@ -775,6 +794,8 @@ class ArrangerWindow:
 
     def detach_document(self, doc_id: int, new_window: bool = True):
         document = self.docs.pop(doc_id)
+        if self._bound_doc_id == doc_id:
+            self._bound_doc_id = None
         if hasattr(document, 'sw') and document.sw and document.sw.get_parent():
             document.sw.get_parent().remove(document.sw)
         if hasattr(document, 'sw') and document.sw:
@@ -1101,7 +1122,7 @@ class ArrangerWindow:
         if doc:
             doc.show_find_results(npage, rectangles)
 
-    def _search_clear(self):
+    def _search_clear(self, unselect_all=False):
         doc = self.focused_document()
         if doc:
-            doc.clear_find_results()
+            doc.clear_find_results(unselect_all)

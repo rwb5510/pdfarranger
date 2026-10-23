@@ -1679,7 +1679,7 @@ git commit -m "Close tabs and windows with one save at a time"
 - Consumes: `Document.find_text`, `ArrangerWindow.show_model`
 - Produces: `SearchBarWidget.bind_document(document) -> None`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -1695,13 +1695,13 @@ class FindTextMemoryTests(unittest.TestCase):
         self.assertEqual(second.find_text, "beta")
 ```
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `python -m unittest tests.test_session.FindTextMemoryTests -v`
 
 Expected: PASS once Task 4 has `find_text`. If it fails, add the field before editing `SearchBarWidget`.
 
-- [ ] **Step 3: Rebind the existing search bar**
+- [x] **Step 3: Rebind the existing search bar**
 
 There is one `SearchBarWidget` under the tab strip, in the same place `pdfarranger.ui` packs `searchbar` today.
 
@@ -1718,13 +1718,13 @@ Before rebinding, `show_model` stores `searchbar.entry.get_text()` into the prev
 
 Find actions (`win.find`, `find_prev`, `find_next`, `find_all`) stay on the window and call the single search bar, which now points at the focused document.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/search.py pdfarranger/window.py pdfarranger/document.py tests/test_session.py
