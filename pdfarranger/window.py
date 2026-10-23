@@ -152,6 +152,12 @@ class ArrangerWindow:
 
         self.page_area = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self.page_area.set_name("page-area")
+        self.page_area.drag_dest_set(
+            Gtk.DestDefaults.ALL,
+            TARGETS_TAB,
+            Gdk.DragAction.MOVE
+        )
+        self.page_area.connect("drag-data-received", self._on_page_area_drag_data_received)
         self.main_box.pack_start(self.page_area, True, True, 0)
         self.main_box.reorder_child(self.page_area, 2)
 
@@ -269,6 +275,22 @@ class ArrangerWindow:
 
         tab_box.show_all()
         self.tab_widgets[doc.id] = (label, tab_box)
+        self._attach_doc_view(doc)
+
+    def _attach_doc_view(self, doc):
+        if Gtk is None or getattr(doc, '_pane_click_connected', False):
+            return
+        doc._pane_click_connected = True
+        if hasattr(doc, 'iconview') and doc.iconview:
+            doc.iconview.connect('button-press-event', lambda _w, _e, d_id=doc.id: self._on_pane_click(d_id, _e))
+        if hasattr(doc, 'sw') and doc.sw:
+            doc.sw.connect('button-press-event', lambda _w, _e, d_id=doc.id: self._on_pane_click(d_id, _e))
+
+    def _on_pane_click(self, doc_id, event):
+        if self.model.split and self.model.focused_id() != doc_id:
+            self.model.click_tab(doc_id)
+            self.show_model()
+        return Gdk.EVENT_PROPAGATE
 
     def _on_tab_button_press(self, doc_id, event):
         return Gdk.EVENT_PROPAGATE
@@ -329,6 +351,41 @@ class ArrangerWindow:
                 self.app.close_window(src_win)
             context.finish(True, False, time)
 
+    def _on_page_area_drag_data_received(self, widget, context, x, y, selection_data, info, time):
+        if info == TAB_MOVE:
+            alloc = self.page_area.get_allocation()
+            half_width = alloc.width / 2.0
+            if x > half_width:
+                data = selection_data.get_data()
+                if not data:
+                    context.finish(False, False, time)
+                    return
+                try:
+                    src_win_id_str, doc_id_str = data.decode("utf-8").split(":", 1)
+                    src_win_id = int(src_win_id_str)
+                    doc_id = int(doc_id_str)
+                except Exception:
+                    context.finish(False, False, time)
+                    return
+
+                src_win = next((w for w in getattr(self.app, 'windows', []) if id(w) == src_win_id), None)
+                if src_win is None:
+                    context.finish(False, False, time)
+                    return
+
+                if src_win != self:
+                    doc, close_source = src_win.detach_document(doc_id, new_window=False)
+                    self.accept_document(doc)
+                    if close_source and hasattr(self.app, 'close_window'):
+                        self.app.close_window(src_win)
+                    doc_id = doc.id
+
+                self.model.drag_tab_to_right(doc_id)
+                self.show_model()
+                context.finish(True, False, time)
+            else:
+                self._on_tab_strip_drag_data_received(widget, context, x, y, selection_data, info, time)
+
     def focused_document(self) -> Document:
         return self.docs.get(self.model.focused_id())
 
@@ -383,6 +440,58 @@ class ArrangerWindow:
         if document == self.focused_document():
             self.retitle()
 
+        if self.window:
+            act_split = self.window.lookup_action('side-by-side')
+            if act_split:
+                act_split.set_enabled(self.model.can_split())
+            act_focus = self.window.lookup_action('focus-other-pane')
+            if act_focus:
+                act_focus.set_enabled(self.model.split)
+
+    def set_split_from_model(self):
+        if Gtk is None or self.page_area is None:
+            return
+
+        def _detach(w):
+            if w is not None and hasattr(w, 'get_parent'):
+                parent = w.get_parent()
+                if parent is not None:
+                    parent.remove(w)
+
+        for child in list(self.page_area.get_children()):
+            if isinstance(child, Gtk.Paned):
+                _detach(child.get_child1())
+                _detach(child.get_child2())
+            self.page_area.remove(child)
+
+        left_doc = self.docs.get(self.model.left_id)
+        right_doc = self.docs.get(self.model.right_id) if self.model.right_id is not None else None
+
+        if self.model.split and left_doc and left_doc.sw and right_doc and right_doc.sw:
+            paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+            _detach(left_doc.sw)
+            _detach(right_doc.sw)
+            paned.pack1(left_doc.sw, resize=True, shrink=False)
+            paned.pack2(right_doc.sw, resize=True, shrink=False)
+            self.page_area.pack_start(paned, True, True, 0)
+            paned.show_all()
+        else:
+            if left_doc and left_doc.sw:
+                _detach(left_doc.sw)
+                self.page_area.pack_start(left_doc.sw, True, True, 0)
+                left_doc.sw.show_all()
+
+        focused_id = self.model.focused_id()
+        for doc_id, doc in self.docs.items():
+            if doc and hasattr(doc, 'sw') and doc.sw:
+                style_ctx = doc.sw.get_style_context()
+                if self.model.split and doc_id == focused_id:
+                    if not style_ctx.has_class("focused-pane"):
+                        style_ctx.add_class("focused-pane")
+                else:
+                    if style_ctx.has_class("focused-pane"):
+                        style_ctx.remove_class("focused-pane")
+
     def show_model(self):
         if Gtk is None:
             return
@@ -395,14 +504,16 @@ class ArrangerWindow:
                 self.tab_strip_box.pack_start(tab_box, False, False, 2)
         self.tab_strip_box.show_all()
 
-        # Update page area
-        for child in self.page_area.get_children():
-            self.page_area.remove(child)
+        # Update page area and split view
+        self.set_split_from_model()
 
-        left_doc = self.docs.get(self.model.left_id)
-        if left_doc and left_doc.sw:
-            self.page_area.pack_start(left_doc.sw, True, True, 0)
-            left_doc.sw.show_all()
+        if self.window:
+            act_split = self.window.lookup_action('side-by-side')
+            if act_split:
+                act_split.set_enabled(self.model.can_split())
+            act_focus = self.window.lookup_action('focus-other-pane')
+            if act_focus:
+                act_focus.set_enabled(self.model.split)
 
         visible_ids = set(self.model.visible_ids())
         for doc_id, doc in self.docs.items():
@@ -465,6 +576,12 @@ class ArrangerWindow:
 
     def detach_document(self, doc_id: int, new_window: bool = True):
         document = self.docs.pop(doc_id)
+        if hasattr(document, 'sw') and document.sw and document.sw.get_parent():
+            document.sw.get_parent().remove(document.sw)
+        if hasattr(document, 'sw') and document.sw:
+            style_ctx = document.sw.get_style_context()
+            if style_ctx.has_class("focused-pane"):
+                style_ctx.remove_class("focused-pane")
         if doc_id in self.tab_widgets:
             _lbl, tab_box = self.tab_widgets.pop(doc_id)
             if tab_box.get_parent():
@@ -565,6 +682,8 @@ class ArrangerWindow:
             ('zoom-out', lambda a, p, u: self._forward('on_action_zoom_out', a, p, u)),
             ('zoom-fit', lambda a, p, u: self._forward('on_action_zoom_fit', a, p, u), 'i'),
             ('fullscreen', self.on_action_fullscreen),
+            ('side-by-side', self.on_action_side_by_side),
+            ('focus-other-pane', self.on_action_focus_other_pane),
             ('close', self.on_action_close),
             ('quit', lambda a, p, u: self.app.on_quit(a, p, u)),
             ('undo', lambda a, p, u: self.focused_document().undomanager.undo()),
@@ -662,6 +781,14 @@ class ArrangerWindow:
             self.window.unfullscreen()
         else:
             self.window.fullscreen()
+
+    def on_action_side_by_side(self, _action=None, _param=None, _unknown=None):
+        self.model.toggle_split()
+        self.show_model()
+
+    def on_action_focus_other_pane(self, _action=None, _param=None, _unknown=None):
+        self.model.focus_other_pane()
+        self.show_model()
 
     def on_action_preferences(self, _action, _option, _unknown):
         handy_available = True if Handy else False

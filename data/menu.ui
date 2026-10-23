@@ -305,6 +305,10 @@ along with PDF Arranger.  If not, see <http://www.gnu.org/licenses/>.
           <attribute name="label" translatable="yes">Full_screen</attribute>
           <attribute name="action">win.fullscreen</attribute>
         </item>
+        <item>
+          <attribute name="label" translatable="yes">_Side by Side</attribute>
+          <attribute name="action">win.side-by-side</attribute>
+        </item>
       </section>
     </submenu>
     <submenu>

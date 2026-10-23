@@ -779,4 +779,130 @@ class Win32HandoffTests(unittest.TestCase):
             self.assertFalse(os.path.exists(lock_file))
 
 
+class SplitEnablementTests(unittest.TestCase):
+    def test_split_action_is_enabled_only_with_two_documents(self):
+        model = WindowModel()
+        self.assertFalse(model.can_split())
+        model.new_tab()
+        self.assertTrue(model.can_split())
+
+
+class SideBySideWindowTests(unittest.TestCase):
+    def test_menu_and_config_declarations(self):
+        import ast
+        import xml.etree.ElementTree as ET
+
+        # Config accels via AST
+        config_path = os.path.join(os.path.dirname(__file__), "..", "pdfarranger", "config.py")
+        with open(config_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        accels = []
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "_DEFAULT_ACCELS":
+                        accels = [ast.literal_eval(elt) for elt in node.value.elts]
+
+        self.assertIn(('focus-other-pane', 'F6'), accels)
+        accel_names = [a[0] for a in accels]
+        self.assertNotIn('side-by-side', accel_names)
+
+        # menu.ui
+        menu_path = os.path.join(os.path.dirname(__file__), "..", "data", "menu.ui")
+        tree = ET.parse(menu_path)
+        root = tree.getroot()
+        side_by_side_found = False
+        for item in root.findall(".//item"):
+            action = item.find("attribute[@name='action']")
+            if action is not None and action.text == "win.side-by-side":
+                label = item.find("attribute[@name='label']")
+                self.assertIsNotNone(label)
+                self.assertEqual(label.text, "_Side by Side")
+                side_by_side_found = True
+                break
+        self.assertTrue(side_by_side_found)
+
+    def test_side_by_side_and_focus_actions_toggle_model(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc1_id = win.model.focused_id()
+
+        # Cannot split with only 1 document
+        win.on_action_side_by_side()
+        self.assertFalse(win.model.split)
+
+        # Add second document
+        win.new_tab()
+        doc2_id = win.model.focused_id()
+        self.assertEqual(len(win.docs), 2)
+        self.assertTrue(win.model.can_split())
+
+        # Select tab 1 to be focused
+        win.model.click_tab(doc1_id)
+        self.assertEqual(win.model.focused_id(), doc1_id)
+
+        # Toggle split on
+        win.on_action_side_by_side()
+        self.assertTrue(win.model.split)
+        self.assertEqual(win.model.left_id, doc1_id)
+        self.assertEqual(win.model.right_id, doc2_id)
+        self.assertEqual(win.model.focused_id(), doc1_id)
+
+        # Focus other pane
+        win.on_action_focus_other_pane()
+        self.assertEqual(win.model.focused_id(), doc2_id)
+
+        # Toggle split off
+        win.on_action_side_by_side()
+        self.assertFalse(win.model.split)
+
+    def test_page_area_tab_drop_routes_to_drag_tab_to_right(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        app.windows.append(win)
+        doc1_id = win.model.focused_id()
+        win.new_tab()
+        doc2_id = win.model.focused_id()
+
+        class DummyAllocation:
+            width = 400
+
+        class DummyPageArea:
+            def get_allocation(self):
+                return DummyAllocation()
+
+        class DummySelectionData:
+            def get_data(self):
+                return f"{id(win)}:{doc2_id}".encode("utf-8")
+
+        class DummyContext:
+            def finish(self, success, delete, time):
+                pass
+
+        win.page_area = DummyPageArea()
+
+        # Drop on left half (x = 100 <= 200): does not split to right
+        win._on_page_area_drag_data_received(
+            None, DummyContext(), 100, 0, DummySelectionData(), 1005, 0
+        )
+        self.assertFalse(win.model.split)
+
+        # Drop on right half (x = 300 > 200): triggers drag_tab_to_right
+        win._on_page_area_drag_data_received(
+            None, DummyContext(), 300, 0, DummySelectionData(), 1005, 0
+        )
+        self.assertTrue(win.model.split)
+        self.assertEqual(win.model.right_id, doc2_id)
 

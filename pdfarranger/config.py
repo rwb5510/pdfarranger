@@ -52,6 +52,7 @@ _DEFAULT_ACCELS = [
     ('zoom-fit(0)', 'f'),
     ('zoom-fit(1)', 'm'),
     ('fullscreen', 'F11'),
+    ('focus-other-pane', 'F6'),
     ('undo', '<Primary>z'),
     ('redo', '<Primary>y'),
     ('cut', '<Primary>x'),

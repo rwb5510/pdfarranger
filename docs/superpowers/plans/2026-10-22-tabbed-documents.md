@@ -1423,7 +1423,7 @@ git commit -m "Add a Windows fallback for handing files to the first window"
 - Consumes: `WindowModel.toggle_split`, `drag_tab_to_right`, `focus_other_pane`, `can_split`, `visible_ids`
 - Produces: `ArrangerWindow.set_split_from_model()`, action `win.side-by-side`, action `win.focus-other-pane`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Task 2 already tests the model. Add the enablement rule the menu must follow. Append:
 
@@ -1436,13 +1436,13 @@ class SplitEnablementTests(unittest.TestCase):
         self.assertTrue(model.can_split())
 ```
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `python -m unittest tests.test_session.SplitEnablementTests -v`
 
 Expected: PASS after Task 2. If it fails, fix `can_split` before building the menu.
 
-- [ ] **Step 3: Show two panes**
+- [x] **Step 3: Show two panes**
 
 In the View menu, add `_Side by Side` with action `win.side-by-side` after Fullscreen.
 
@@ -1474,13 +1474,13 @@ Call `release_renderer()` for every document id outside `model.visible_ids()`. C
 
 Zoom actions stay forwarded to `focused_document()`, so each pane keeps the zoom stored on its document.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/window.py pdfarranger/config.py data/menu.ui tests/test_session.py

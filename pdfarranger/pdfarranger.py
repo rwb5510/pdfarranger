@@ -500,6 +500,11 @@ class PdfArranger(ApplicationBase):
             scrolledwindow overshoot {
                 background: none;
             }
+            scrolledwindow.focused-pane {
+                border-width: 2px;
+                border-style: solid;
+                border-color: #1c71d8;
+            }
             """
             style_provider.load_from_data(bytes(css_data.encode()))
             Gtk.StyleContext.add_provider_for_screen(
