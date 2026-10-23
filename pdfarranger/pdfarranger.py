@@ -299,8 +299,12 @@ class PdfArranger(ApplicationBase):
     MODEL_ROW_EXTERN = 1002
     # Drag and drop ID for pages coming from a non-pdfarranger application
     TEXT_URI_LIST = 1003
+    # Drag and drop ID for pages moving across documents within the same application
+    MODEL_ROW_SAME_APP = 1004
     TARGETS_IV = [Gtk.TargetEntry.new('MODEL_ROW_INTERN', Gtk.TargetFlags.SAME_WIDGET,
                                       MODEL_ROW_INTERN),
+                  Gtk.TargetEntry.new('MODEL_ROW_SAME_APP', Gtk.TargetFlags.SAME_APP,
+                                      MODEL_ROW_SAME_APP),
                   Gtk.TargetEntry.new('MODEL_ROW_EXTERN', Gtk.TargetFlags.OTHER_APP,
                                       MODEL_ROW_EXTERN)] if Gtk else []
     TARGETS_SW = [Gtk.TargetEntry.new('text/uri-list', 0, TEXT_URI_LIST),

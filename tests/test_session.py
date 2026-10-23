@@ -906,3 +906,319 @@ class SideBySideWindowTests(unittest.TestCase):
         self.assertTrue(win.model.split)
         self.assertEqual(win.model.right_id, doc2_id)
 
+
+from pdfarranger.document import page_drag_action_is_move
+
+
+class PageDragTests(unittest.TestCase):
+    def test_windows_moves_unless_ctrl_is_held(self):
+        self.assertTrue(page_drag_action_is_move("nt", ctrl_held=False))
+        self.assertFalse(page_drag_action_is_move("nt", ctrl_held=True))
+
+    def test_posix_moves(self):
+        self.assertTrue(page_drag_action_is_move("posix", ctrl_held=False))
+        self.assertTrue(page_drag_action_is_move("posix", ctrl_held=True))
+
+    def test_same_app_payload_round_trip(self):
+        from pdfarranger.document import encode_page_drag, decode_page_drag
+        payload = encode_page_drag(7, ["0", "2"])
+        self.assertEqual(decode_page_drag(payload), (7, ["0", "2"]))
+
+    def test_invalid_os_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            page_drag_action_is_move("darwin", ctrl_held=False)
+
+    def test_target_constants(self):
+        from pdfarranger.document import MODEL_ROW_SAME_APP, Document
+        from pdfarranger.pdfarranger import PdfArranger
+        self.assertEqual(MODEL_ROW_SAME_APP, 1004)
+        self.assertEqual(Document.MODEL_ROW_SAME_APP, 1004)
+        self.assertEqual(PdfArranger.MODEL_ROW_SAME_APP, 1004)
+
+    def test_tab_box_uri_drop_calls_import_files(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc1_id = win.model.focused_id()
+        win.new_tab()
+        doc2_id = win.model.focused_id()
+
+        imported = []
+        win.import_files = lambda d_id, paths: imported.append((d_id, list(paths)))
+
+        class DummySelectionData:
+            def get_target(self):
+                class Target:
+                    def name(self):
+                        return "text/uri-list"
+                return Target()
+
+            def get_uris(self):
+                return ["file:///path/to/doc.pdf"]
+
+        class DummyContext:
+            def __init__(self):
+                self.finished = False
+
+            def finish(self, success, delete, time):
+                self.finished = True
+
+        ctx = DummyContext()
+        win._on_tab_box_drag_data_received(None, ctx, 0, 0, DummySelectionData(), 1003, 0, doc1_id)
+        self.assertTrue(ctx.finished)
+        self.assertEqual(len(imported), 1)
+        self.assertEqual(imported[0][0], doc1_id)
+        self.assertTrue(imported[0][1][0].endswith("doc.pdf"))
+
+    def test_page_area_uri_drop_calls_add_paths_on_focused_document(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc1_id = win.model.focused_id()
+
+        added = []
+        win._add_paths = lambda doc, paths: added.append((doc.id, list(paths)))
+
+        class DummySelectionData:
+            def get_target(self):
+                class Target:
+                    def name(self):
+                        return "text/uri-list"
+                return Target()
+
+            def get_uris(self):
+                return ["file:///path/to/drop_page_area.pdf"]
+
+        class DummyContext:
+            def __init__(self):
+                self.finished = False
+
+            def finish(self, success, delete, time):
+                self.finished = True
+
+        ctx = DummyContext()
+        win._on_page_area_drag_data_received(None, ctx, 0, 0, DummySelectionData(), 1003, 0)
+        self.assertTrue(ctx.finished)
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0][0], doc1_id)
+        self.assertTrue(added[0][1][0].endswith("drop_page_area.pdf"))
+
+    def test_tab_strip_uri_drop_calls_add_paths_on_focused_document(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc1_id = win.model.focused_id()
+
+        added = []
+        win._add_paths = lambda doc, paths: added.append((doc.id, list(paths)))
+
+        class DummySelectionData:
+            def get_target(self):
+                class Target:
+                    def name(self):
+                        return "text/uri-list"
+                return Target()
+
+            def get_uris(self):
+                return ["file:///path/to/drop_tab_strip.pdf"]
+
+        class DummyContext:
+            def __init__(self):
+                self.finished = False
+
+            def finish(self, success, delete, time):
+                self.finished = True
+
+        ctx = DummyContext()
+        win._on_tab_strip_drag_data_received(None, ctx, 0, 0, DummySelectionData(), 1003, 0)
+        self.assertTrue(ctx.finished)
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0][0], doc1_id)
+        self.assertTrue(added[0][1][0].endswith("drop_tab_strip.pdf"))
+
+    def test_document_same_app_dnd_get_data(self):
+        from pdfarranger.document import Document
+
+        class DummyIconView:
+            def get_selected_items(self):
+                class Path:
+                    def __init__(self, idx):
+                        self.idx = idx
+                    def get_indices(self):
+                        return [self.idx]
+                return [Path(3), Path(1)]
+
+        doc = Document(None, 42)
+        doc.iconview = DummyIconView()
+
+        class DummyTarget:
+            def name(self):
+                return "MODEL_ROW_SAME_APP"
+
+        class DummySelectionData:
+            def __init__(self):
+                self.data = None
+
+            def get_target(self):
+                return DummyTarget()
+
+            def set(self, target, format_val, payload):
+                self.data = payload
+
+        sel = DummySelectionData()
+        doc.iv_dnd_get_data(doc.iconview, None, sel, 1004, 0)
+        from pdfarranger.document import decode_page_drag
+        self.assertEqual(decode_page_drag(sel.data), (42, ["1", "3"]))
+
+    def test_document_same_app_dnd_received_data_move(self):
+        from pdfarranger.document import Document, encode_page_drag
+
+        class DummyPage:
+            def __init__(self, name, nfile=1):
+                self.name = name
+                self.description = name
+                self.nfile = nfile
+                self.layerpages = []
+
+            def duplicate(self):
+                return DummyPage(self.name, self.nfile)
+
+            def width_in_pixel(self):
+                return 100
+
+        class DummyModel:
+            def __init__(self, items):
+                self.items = list(items)
+
+            def __len__(self):
+                return len(self.items)
+
+            def __iter__(self):
+                for item in self.items:
+                    yield [item, item.description]
+
+            def __getitem__(self, idx):
+                return [self.items[idx], self.items[idx].description]
+
+            def get_iter(self, path):
+                return path
+
+            def get_value(self, it, col):
+                return self.items[int(str(it))]
+
+            def append(self, row):
+                self.items.append(row[0])
+                return len(self.items) - 1
+
+            def get_path(self, it):
+                return str(it)
+
+            def remove(self, it):
+                idx = int(str(it))
+                if 0 <= idx < len(self.items):
+                    self.items.pop(idx)
+
+        class DummyIconView:
+            def __init__(self, model):
+                self.model = model
+                self.selected = []
+
+            def get_model(self):
+                return self.model
+
+            def get_direction(self):
+                return 0
+
+            def select_path(self, path):
+                self.selected.append(path)
+
+            def get_selected_items(self):
+                return []
+
+        class DummyUndoManager:
+            def __init__(self):
+                self.actions = []
+
+            def commit(self, action):
+                self.actions.append(action)
+
+        class DummyApp:
+            def __init__(self, docs):
+                self.docs = docs
+
+            def document_by_id(self, doc_id):
+                return self.docs.get(doc_id)
+
+        source_doc = Document(None, 1)
+        dest_doc = Document(None, 2)
+        source_doc.update_iconview_geometry = lambda: None
+        dest_doc.update_iconview_geometry = lambda: None
+        app = DummyApp({1: source_doc, 2: dest_doc})
+        source_doc.app = app
+        dest_doc.app = app
+
+        class DummyPdfDoc:
+            def __init__(self):
+                self.password = None
+
+        source_model = DummyModel([DummyPage("p0"), DummyPage("p1"), DummyPage("p2")])
+        source_doc.model = source_model
+        source_doc.iconview = DummyIconView(source_model)
+        source_doc.undomanager = DummyUndoManager()
+        source_doc.pdfqueue = [DummyPdfDoc()]
+
+        dest_model = DummyModel([])
+        dest_doc.model = dest_model
+        dest_doc.iconview = DummyIconView(dest_model)
+        dest_doc.undomanager = DummyUndoManager()
+        dest_doc.pdfqueue = []
+
+        class DummyContext:
+            def get_selected_action(self):
+                # Gdk.DragAction.MOVE = 4
+                return 4
+
+        class DummyTarget:
+            def name(self):
+                return "MODEL_ROW_SAME_APP"
+
+        class DummySelectionData:
+            def get_target(self):
+                return DummyTarget()
+
+            def get_data(self):
+                return encode_page_drag(1, ["1"])
+
+        dest_doc.drag_path = None
+        dest_doc.drag_pos = 0
+
+        # Run iv_dnd_received_data
+        dest_doc.iv_dnd_received_data(dest_doc.iconview, DummyContext(), 0, 0, DummySelectionData(), 1004, 0)
+
+        # Dest received p1
+        self.assertEqual(len(dest_model.items), 1)
+        self.assertEqual(dest_model.items[0].name, "p1")
+        self.assertEqual(dest_doc.undomanager.actions, ["Move"])
+        self.assertTrue(dest_doc.is_unsaved)
+        self.assertEqual(len(dest_doc.pdfqueue), 1)
+
+        # Source removed p1
+        self.assertEqual(len(source_model.items), 2)
+        self.assertEqual(source_doc.undomanager.actions, ["Move"])
+        self.assertTrue(source_doc.is_unsaved)
+

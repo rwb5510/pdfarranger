@@ -112,18 +112,44 @@ def is_ctrl_pressed():
     return bool(ctypes.windll.user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
 
 
+def page_drag_action_is_move(os_name: str, ctrl_held: bool) -> bool:
+    if os_name == "nt":
+        return not ctrl_held
+    if os_name == "posix":
+        return True
+    raise ValueError(os_name)
+
+
+def encode_page_drag(doc_id: int, paths: list) -> bytes:
+    body = str(doc_id) + "\n" + "\n".join(paths)
+    return body.encode("utf-8")
+
+
+def decode_page_drag(payload: bytes):
+    text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+    doc_id, *paths = text.split("\n")
+    return int(doc_id), paths
+
+
 MODEL_ROW_INTERN = 1001
 MODEL_ROW_EXTERN = 1002
 TEXT_URI_LIST = 1003
+MODEL_ROW_SAME_APP = 1004
 
 if Gtk is not None:
-    TARGETS_IV = [Gtk.TargetEntry.new('MODEL_ROW_INTERN', Gtk.TargetFlags.SAME_WIDGET,
-                                      MODEL_ROW_INTERN),
-                  Gtk.TargetEntry.new('MODEL_ROW_EXTERN', Gtk.TargetFlags.OTHER_APP,
-                                      MODEL_ROW_EXTERN)]
-    TARGETS_SW = [Gtk.TargetEntry.new('text/uri-list', 0, TEXT_URI_LIST),
-                  Gtk.TargetEntry.new('MODEL_ROW_EXTERN', Gtk.TargetFlags.OTHER_APP,
-                                      MODEL_ROW_EXTERN)]
+    TARGETS_IV = [
+        Gtk.TargetEntry.new('MODEL_ROW_INTERN', Gtk.TargetFlags.SAME_WIDGET,
+                           MODEL_ROW_INTERN),
+        Gtk.TargetEntry.new('MODEL_ROW_SAME_APP', Gtk.TargetFlags.SAME_APP,
+                           MODEL_ROW_SAME_APP),
+        Gtk.TargetEntry.new('MODEL_ROW_EXTERN', Gtk.TargetFlags.OTHER_APP,
+                           MODEL_ROW_EXTERN),
+    ]
+    TARGETS_SW = [
+        Gtk.TargetEntry.new('text/uri-list', 0, TEXT_URI_LIST),
+        Gtk.TargetEntry.new('MODEL_ROW_EXTERN', Gtk.TargetFlags.OTHER_APP,
+                           MODEL_ROW_EXTERN),
+    ]
 else:
     TARGETS_IV = []
     TARGETS_SW = []
@@ -135,6 +161,7 @@ class Document:
     MODEL_ROW_INTERN = MODEL_ROW_INTERN
     MODEL_ROW_EXTERN = MODEL_ROW_EXTERN
     TEXT_URI_LIST = TEXT_URI_LIST
+    MODEL_ROW_SAME_APP = MODEL_ROW_SAME_APP
 
     def __init__(self, app, doc_id: int):
         self.app = app
@@ -1631,7 +1658,7 @@ class Document:
                         selection_data, _target_id, _etime):
         """Handles requests for data by drag and drop in iconview"""
 
-        target = str(selection_data.get_target())
+        target = selection_data.get_target().name() if hasattr(selection_data.get_target(), 'name') else str(selection_data.get_target())
         if target == 'MODEL_ROW_INTERN':
             self.target_is_intern = True
             selection = self.iconview.get_selected_items()
@@ -1641,12 +1668,20 @@ class Document:
                 data.append(str(path[0]))
             if data:
                 data = '\n;\n'.join(data)
+            selection_data.set(selection_data.get_target(), 8, data.encode())
+        elif target == 'MODEL_ROW_SAME_APP':
+            self.target_is_intern = True
+            selection = self.iconview.get_selected_items()
+            selection.sort(key=lambda x: x.get_indices()[0])
+            selected_paths = [str(path.get_indices()[0]) for path in selection]
+            payload = encode_page_drag(self.id, selected_paths)
+            selection_data.set(selection_data.get_target(), 8, payload)
         elif target == 'MODEL_ROW_EXTERN':
             self.target_is_intern = False
             data = self.copy_pages(add_hash=False)
+            selection_data.set(selection_data.get_target(), 8, data.encode())
         else:
             return
-        selection_data.set(selection_data.get_target(), 8, data.encode())
 
     @staticmethod
     def _is_noop_move(data, ref_to, before):
@@ -1662,47 +1697,229 @@ class Document:
         """Handles received data by drag and drop in iconview"""
 
         model = iconview.get_model()
-        data = selection_data.get_data()
-        if not data:
+        raw_data = selection_data.get_data()
+        if not raw_data:
             return
         load_password = (len(self.pdfqueue) == 0) and self.password is None
-        data = data.decode().split('\n;\n')
-        if self.drag_path and len(model) > 0:
+        if Gtk is not None and self.drag_path and len(model) > 0:
             ref_to = Gtk.TreeRowReference.new(model, self.drag_path)
         else:
             ref_to = None
-        if self.iconview.get_direction() == Gtk.TextDirection.LTR:
-            before = self.drag_pos == Gtk.IconViewDropPosition.DROP_LEFT
+        if Gtk is not None and hasattr(Gtk, 'TextDirection') and hasattr(self.iconview, 'get_direction'):
+            if self.iconview.get_direction() == Gtk.TextDirection.LTR:
+                before = self.drag_pos == Gtk.IconViewDropPosition.DROP_LEFT
+            else:
+                before = self.drag_pos == Gtk.IconViewDropPosition.DROP_RIGHT
         else:
-            before = self.drag_pos == Gtk.IconViewDropPosition.DROP_RIGHT
-        target = selection_data.get_target().name()
+            before = True
+        target = selection_data.get_target().name() if hasattr(selection_data.get_target(), 'name') else str(selection_data.get_target())
         if target == 'MODEL_ROW_INTERN':
-            move = context.get_selected_action() & Gdk.DragAction.MOVE
+            data = raw_data.decode().split('\n;\n')
+            move = context.get_selected_action() & Gdk.DragAction.MOVE if Gdk else False
             if move and ref_to and self._is_noop_move(data, ref_to, before):
                 return
             self.undomanager.commit("Move" if move else "Copy")
             self.set_unsaved(True)
             data.sort(key=int, reverse=not before)
             ref_from_list = [Gtk.TreeRowReference.new(model, Gtk.TreePath(p))
-                             for p in data]
-            iter_to = self.model.get_iter(ref_to.get_path())
+                             for p in data] if Gtk else []
+            iter_to = self.model.get_iter(ref_to.get_path()) if ref_to else None
             with self.render_lock():
-                for ref_from in ref_from_list:
-                    iterator = model.get_iter(ref_from.get_path())
-                    page = model.get_value(iterator, 0).duplicate()
-                    if before:
-                        it = model.insert_before(iter_to, [page, page.description])
-                    else:
-                        it = model.insert_after(iter_to, [page, page.description])
-                    path = model.get_path(it)
-                    iconview.select_path(path)
-                if move:
+                if Gtk:
                     for ref_from in ref_from_list:
-                        model.remove(model.get_iter(ref_from.get_path()))
-            self.iv_selection_changed()
-            GObject.idle_add(self.render)
+                        iterator = model.get_iter(ref_from.get_path())
+                        page = model.get_value(iterator, 0).duplicate()
+                        if ref_to:
+                            if before:
+                                it = model.insert_before(iter_to, [page, page.description])
+                            else:
+                                it = model.insert_after(iter_to, [page, page.description])
+                        else:
+                            it = model.append([page, page.description])
+                        path = model.get_path(it)
+                        iconview.select_path(path)
+                    if move:
+                        for ref_from in ref_from_list:
+                            model.remove(model.get_iter(ref_from.get_path()))
+                else:
+                    for p in data:
+                        iterator = model.get_iter(p)
+                        page = model.get_value(iterator, 0).duplicate()
+                        if ref_to:
+                            if before:
+                                it = model.insert_before(iter_to, [page, page.description])
+                            else:
+                                it = model.insert_after(iter_to, [page, page.description])
+                        else:
+                            it = model.append([page, page.description])
+                        path = model.get_path(it) if hasattr(model, 'get_path') else it
+                        iconview.select_path(path)
+                    if move:
+                        for p in sorted(data, key=int, reverse=True):
+                            model.remove(model.get_iter(p))
+            if hasattr(self, 'iv_selection_changed'):
+                self.iv_selection_changed()
+            if GObject:
+                GObject.idle_add(self.render)
+
+        elif target == 'MODEL_ROW_SAME_APP':
+            src_id, paths = decode_page_drag(raw_data)
+            app = getattr(self, 'app', None)
+            if app is None and hasattr(self, 'host'):
+                app = getattr(self.host, 'app', None)
+            source = app.document_by_id(src_id) if app else None
+            if source is None:
+                return
+
+            if source == self:
+                # Same document drag falling into SAME_APP target: handle safely
+                move = bool(context.get_selected_action() & Gdk.DragAction.MOVE) if Gdk else False
+                if move and ref_to and self._is_noop_move(paths, ref_to, before):
+                    return
+                self.undomanager.commit("Move" if move else "Copy")
+                self.set_unsaved(True)
+                paths.sort(key=int, reverse=not before)
+                ref_from_list = [Gtk.TreeRowReference.new(model, Gtk.TreePath(p)) for p in paths] if Gtk else []
+                iter_to = self.model.get_iter(ref_to.get_path()) if ref_to else None
+                with self.render_lock():
+                    if Gtk:
+                        for ref_from in ref_from_list:
+                            iterator = model.get_iter(ref_from.get_path())
+                            page = model.get_value(iterator, 0).duplicate()
+                            if ref_to:
+                                if before:
+                                    it = model.insert_before(iter_to, [page, page.description])
+                                else:
+                                    it = model.insert_after(iter_to, [page, page.description])
+                            else:
+                                it = model.append([page, page.description])
+                            path = model.get_path(it)
+                            iconview.select_path(path)
+                        if move:
+                            for ref_from in ref_from_list:
+                                model.remove(model.get_iter(ref_from.get_path()))
+                    else:
+                        for p in paths:
+                            iterator = model.get_iter(p)
+                            page = model.get_value(iterator, 0).duplicate()
+                            if ref_to:
+                                if before:
+                                    it = model.insert_before(iter_to, [page, page.description])
+                                else:
+                                    it = model.insert_after(iter_to, [page, page.description])
+                            else:
+                                it = model.append([page, page.description])
+                            path = model.get_path(it) if hasattr(model, 'get_path') else it
+                            iconview.select_path(path)
+                        if move:
+                            for p in sorted(paths, key=int, reverse=True):
+                                model.remove(model.get_iter(p))
+                if hasattr(self, 'iv_selection_changed'):
+                    self.iv_selection_changed()
+                if GObject:
+                    GObject.idle_add(self.render)
+            else:
+                move = bool(context.get_selected_action() & Gdk.DragAction.MOVE) if Gdk else (bool(context.get_selected_action() & 4) if hasattr(context, 'get_selected_action') else False)
+                self.undomanager.commit("Move" if move else "Copy")
+                self.set_unsaved(True)
+
+                paths.sort(key=int, reverse=not before if ref_to else False)
+                source_model = source.iconview.get_model()
+                ref_from_list = [Gtk.TreeRowReference.new(source_model, Gtk.TreePath(p)) for p in paths] if Gtk else []
+                iter_to = self.model.get_iter(ref_to.get_path()) if ref_to else None
+
+                with self.render_lock():
+                    if Gtk:
+                        for ref_from in ref_from_list:
+                            if not ref_from.valid():
+                                continue
+                            iterator = source_model.get_iter(ref_from.get_path())
+                            page = source_model.get_value(iterator, 0).duplicate()
+
+                            # Ensure pdfdoc is present in self.pdfqueue
+                            if hasattr(page, 'nfile') and page.nfile and page.nfile <= len(source.pdfqueue):
+                                pdfdoc = source.pdfqueue[page.nfile - 1]
+                                if pdfdoc not in self.pdfqueue:
+                                    self.pdfqueue.append(pdfdoc)
+                                page.nfile = self.pdfqueue.index(pdfdoc) + 1
+
+                            for lp in getattr(page, 'layerpages', []):
+                                if hasattr(lp, 'nfile') and lp.nfile and lp.nfile <= len(source.pdfqueue):
+                                    lp_pdfdoc = source.pdfqueue[lp.nfile - 1]
+                                    if lp_pdfdoc not in self.pdfqueue:
+                                        self.pdfqueue.append(lp_pdfdoc)
+                                    lp.nfile = self.pdfqueue.index(lp_pdfdoc) + 1
+
+                            if ref_to:
+                                if before:
+                                    it = model.insert_before(iter_to, [page, page.description])
+                                else:
+                                    it = model.insert_after(iter_to, [page, page.description])
+                            else:
+                                it = model.append([page, page.description])
+                            path = model.get_path(it)
+                            iconview.select_path(path)
+                    else:
+                        for p in paths:
+                            iterator = source_model.get_iter(p)
+                            page = source_model.get_value(iterator, 0).duplicate()
+
+                            # Ensure pdfdoc is present in self.pdfqueue
+                            if hasattr(page, 'nfile') and page.nfile and page.nfile <= len(source.pdfqueue):
+                                pdfdoc = source.pdfqueue[page.nfile - 1]
+                                if pdfdoc not in self.pdfqueue:
+                                    self.pdfqueue.append(pdfdoc)
+                                page.nfile = self.pdfqueue.index(pdfdoc) + 1
+
+                            for lp in getattr(page, 'layerpages', []):
+                                if hasattr(lp, 'nfile') and lp.nfile and lp.nfile <= len(source.pdfqueue):
+                                    lp_pdfdoc = source.pdfqueue[lp.nfile - 1]
+                                    if lp_pdfdoc not in self.pdfqueue:
+                                        self.pdfqueue.append(lp_pdfdoc)
+                                    lp.nfile = self.pdfqueue.index(lp_pdfdoc) + 1
+
+                            if ref_to:
+                                if before:
+                                    it = model.insert_before(iter_to, [page, page.description])
+                                else:
+                                    it = model.insert_after(iter_to, [page, page.description])
+                            else:
+                                it = model.append([page, page.description])
+                            path = model.get_path(it) if hasattr(model, 'get_path') else it
+                            iconview.select_path(path)
+
+                if move:
+                    with source.render_lock():
+                        source.undomanager.commit("Move")
+                        source.set_unsaved(True)
+                        if Gtk:
+                            for ref_from in ref_from_list:
+                                if ref_from.valid():
+                                    source_model.remove(source_model.get_iter(ref_from.get_path()))
+                        else:
+                            for p in sorted(paths, key=int, reverse=True):
+                                source_model.remove(source_model.get_iter(p))
+                    if hasattr(source, 'iv_selection_changed'):
+                        source.iv_selection_changed()
+                    if hasattr(source, 'update_iconview_geometry'):
+                        source.update_iconview_geometry()
+                    if GObject and hasattr(source, 'render'):
+                        GObject.idle_add(source.render)
+                    if hasattr(source, 'host') and hasattr(source.host, 'refresh_document'):
+                        source.host.refresh_document(source)
+                    malloc_trim()
+
+                if hasattr(self, 'iv_selection_changed'):
+                    self.iv_selection_changed()
+                if hasattr(self, 'update_iconview_geometry'):
+                    self.update_iconview_geometry()
+                if GObject and hasattr(self, 'render'):
+                    GObject.idle_add(self.render)
+                if hasattr(self, 'host') and hasattr(self.host, 'refresh_document'):
+                    self.host.refresh_document(self)
 
         elif target == 'MODEL_ROW_EXTERN':
+            data = raw_data.decode().split('\n;\n')
             data = self.deserialize(data)
             changed = self.paste_pages(data, before, ref_to, select_added=True)
             if changed and context.get_selected_action() & Gdk.DragAction.MOVE:
@@ -1747,9 +1964,8 @@ class Document:
         self.iv_autoscroll(x, y, autoscroll_area=40)
 
         # Select move or copy dragAction
-        drag_move_posix = os.name == 'posix' and context.get_actions() & Gdk.DragAction.MOVE
-        drag_move_nt = os.name == 'nt' and not is_ctrl_pressed()
-        if drag_move_posix or drag_move_nt:
+        ctrl_held = is_ctrl_pressed() if os.name == "nt" else False
+        if page_drag_action_is_move(os.name, ctrl_held):
             Gdk.drag_status(context, Gdk.DragAction.MOVE, etime)
         else:
             Gdk.drag_status(context, Gdk.DragAction.COPY, etime)

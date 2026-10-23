@@ -49,7 +49,7 @@ from .session import (
     tab_label,
     tab_tooltip,
 )
-from .document import Document
+from .document import Document, get_file_path_from_uri
 
 _ = gettext.gettext
 DOMAIN = 'pdfarranger'
@@ -65,9 +65,11 @@ def filenames_for_open(filenames: list) -> list:
 
 
 TAB_MOVE = 1005
+TEXT_URI_LIST = 1003
 if Gtk is not None:
     TARGETS_TAB = [
-        Gtk.TargetEntry.new('application/x-pdfarranger-tab', Gtk.TargetFlags.SAME_APP, TAB_MOVE)
+        Gtk.TargetEntry.new('application/x-pdfarranger-tab', Gtk.TargetFlags.SAME_APP, TAB_MOVE),
+        Gtk.TargetEntry.new('text/uri-list', 0, TEXT_URI_LIST),
     ]
 else:
     TARGETS_TAB = []
@@ -268,6 +270,20 @@ class ArrangerWindow:
         event_box.connect("button-release-event", lambda _w, _e, d_id=doc.id: self._on_tab_button_release(d_id, _e))
         tab_box.pack_start(event_box, True, True, 4)
 
+        tab_box.drag_dest_set(
+            Gtk.DestDefaults.ALL,
+            TARGETS_TAB,
+            Gdk.DragAction.MOVE | Gdk.DragAction.COPY
+        )
+        tab_box.connect("drag-data-received", self._on_tab_box_drag_data_received, doc.id)
+
+        event_box.drag_dest_set(
+            Gtk.DestDefaults.ALL,
+            TARGETS_TAB,
+            Gdk.DragAction.MOVE | Gdk.DragAction.COPY
+        )
+        event_box.connect("drag-data-received", self._on_tab_box_drag_data_received, doc.id)
+
         close_btn = Gtk.Button.new_with_label("×")
         close_btn.set_relief(Gtk.ReliefStyle.NONE)
         close_btn.connect("clicked", lambda _w, d_id=doc.id: self.close_document(d_id))
@@ -321,8 +337,43 @@ class ArrangerWindow:
     def _on_tab_drag_end(self, widget, context, doc_id):
         self._dragging_tab = False
 
+    def _on_tab_box_drag_data_received(self, widget, context, x, y, selection_data, info, time, doc_id):
+        target = ""
+        if hasattr(selection_data, 'get_target') and selection_data.get_target():
+            t = selection_data.get_target()
+            target = t.name() if hasattr(t, 'name') else str(t)
+        if target == 'text/uri-list' or info == TEXT_URI_LIST:
+            uris = selection_data.get_uris()
+            if uris:
+                paths = [get_file_path_from_uri(u) for u in uris]
+                self.import_files(doc_id, paths)
+                context.finish(True, False, time)
+                return
+            context.finish(False, False, time)
+            return
+        elif info == TAB_MOVE or target == 'application/x-pdfarranger-tab':
+            self._on_tab_strip_drag_data_received(widget, context, x, y, selection_data, info, time)
+
     def _on_tab_strip_drag_data_received(self, widget, context, x, y, selection_data, info, time):
-        if info == TAB_MOVE:
+        target = ""
+        if hasattr(selection_data, 'get_target') and selection_data.get_target():
+            t = selection_data.get_target()
+            target = t.name() if hasattr(t, 'name') else str(t)
+        if target == 'text/uri-list' or info == TEXT_URI_LIST:
+            uris = selection_data.get_uris()
+            if uris:
+                paths = [get_file_path_from_uri(u) for u in uris]
+                focused = self.focused_document()
+                if focused:
+                    self._add_paths(focused, paths)
+                    self.refresh_document(focused)
+                    self.show_model()
+                context.finish(True, False, time)
+                return
+            context.finish(False, False, time)
+            return
+
+        if info == TAB_MOVE or target == 'application/x-pdfarranger-tab':
             data = selection_data.get_data()
             if not data:
                 context.finish(False, False, time)
@@ -352,7 +403,25 @@ class ArrangerWindow:
             context.finish(True, False, time)
 
     def _on_page_area_drag_data_received(self, widget, context, x, y, selection_data, info, time):
-        if info == TAB_MOVE:
+        target = ""
+        if hasattr(selection_data, 'get_target') and selection_data.get_target():
+            t = selection_data.get_target()
+            target = t.name() if hasattr(t, 'name') else str(t)
+        if target == 'text/uri-list' or info == TEXT_URI_LIST:
+            uris = selection_data.get_uris()
+            if uris:
+                paths = [get_file_path_from_uri(u) for u in uris]
+                focused = self.focused_document()
+                if focused:
+                    self._add_paths(focused, paths)
+                    self.refresh_document(focused)
+                    self.show_model()
+                context.finish(True, False, time)
+                return
+            context.finish(False, False, time)
+            return
+
+        if info == TAB_MOVE or target == 'application/x-pdfarranger-tab':
             alloc = self.page_area.get_allocation()
             half_width = alloc.width / 2.0
             if x > half_width:
@@ -614,13 +683,15 @@ class ArrangerWindow:
         self.show_model()
 
     def _add_paths(self, receiver: Document, paths: list) -> bool:
-        if PageAdder is None:
+        if PageAdder is None or receiver is None:
             return False
         adder = PageAdder(receiver)
         any_added = False
         load_password = (len(receiver.pdfqueue) == 0) and receiver.password is None
         for p in paths:
             filepath = p.get_path() if hasattr(p, 'get_path') else str(p)
+            if filepath.startswith("file:"):
+                filepath = get_file_path_from_uri(filepath)
             added = adder.addpages(filepath)
             if not added:
                 break
@@ -630,6 +701,17 @@ class ArrangerWindow:
             if load_password:
                 receiver.set_password_from_input_files()
         return any_added
+
+    def import_files(self, doc_id: int, paths: list) -> bool:
+        doc = self.docs.get(doc_id)
+        if doc is None:
+            return False
+        cleaned = [get_file_path_from_uri(p) if str(p).startswith("file:") else (p.get_path() if hasattr(p, 'get_path') else str(p)) for p in paths]
+        added = self._add_paths(doc, cleaned)
+        if added:
+            self.refresh_document(doc)
+            self.show_model()
+        return added
 
     def open_files(self, paths: list):
         paths = filenames_for_open(paths)

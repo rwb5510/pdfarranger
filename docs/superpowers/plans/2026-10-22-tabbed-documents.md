@@ -1499,7 +1499,7 @@ git commit -m "Add a two-pane view for the focused window"
 - Consumes: `drop_target`, `DropSite`, `SaveGate` is not used here
 - Produces: drag target `MODEL_ROW_SAME_APP = 1004` with `Gtk.TargetFlags.SAME_APP`. Payload is `"{src_doc_id}\\n{path}\\n{path}"` encoded utf-8. `Document.iv_dnd_received_data` handles that target.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -1522,13 +1522,13 @@ class PageDragTests(unittest.TestCase):
         self.assertEqual(decode_page_drag(payload), (7, ["0", "2"]))
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.PageDragTests -v`
 
 Expected: FAIL with `ImportError`.
 
-- [ ] **Step 3: Copy or move pages between icon views**
+- [x] **Step 3: Copy or move pages between icon views**
 
 ```python
 def page_drag_action_is_move(os_name: str, ctrl_held: bool) -> bool:
@@ -1569,13 +1569,13 @@ File drops: `sw_dnd_received_data` adds URIs to `self`, the document that owns t
 
 The tab box’s `drag-data-received` for `text/uri-list` calls `window.import_files(doc_id, paths)` which runs `_add_paths` on that document. The page-area background (drops that hit neither a tab nor an icon view) calls `_add_paths` on `focused_document()`. Several URIs go through one `PageAdder.commit`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/document.py pdfarranger/window.py tests/test_session.py
