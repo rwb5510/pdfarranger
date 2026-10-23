@@ -296,3 +296,22 @@ class DocumentShellTests(unittest.TestCase):
         doc.release_renderer()
         self.assertTrue(doc.rendering_thread.quit)
 
+
+class DocumentMethodTests(unittest.TestCase):
+    def test_page_operations_live_on_document(self):
+        names = [
+            "build_view",
+            "render",
+            "quit_rendering",
+            "set_unsaved",
+            "save_or_choose",
+            "paste_pages",
+            "iv_dnd_received_data",
+            "sw_dnd_received_data",
+            "on_action_zoom_in",
+            "clear_data",
+            "error_message_dialog",
+        ]
+        for name in names:
+            self.assertTrue(callable(getattr(Document, name)), name)
+

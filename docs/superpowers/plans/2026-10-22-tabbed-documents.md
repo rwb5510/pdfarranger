@@ -944,7 +944,7 @@ git commit -m "Add a document shell with its own page state"
 - Consumes: `Document` from Task 4. `PageAdder` and `undo.Manager` keep their constructors and receive a `Document` as `app`.
 - Produces: every method named in the file-structure move list exists on `Document`. `Document.build_view(sw_parent_unused)` creates `model`, `undomanager`, `iconview`, and `sw` using the block that is today at `pdfarranger.py` lines 786–834. `Document.error_message_dialog` calls `self.host.error_message_dialog`. `self.host` is the `ArrangerWindow` set later. Until Task 6, `PdfArranger` still constructs one `Document`, assigns `self.doc = document`, and action callbacks call `self.doc.<method>`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -968,13 +968,13 @@ class DocumentMethodTests(unittest.TestCase):
             self.assertTrue(callable(getattr(Document, name)), name)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.DocumentMethodTests -v`
 
 Expected: FAIL because `build_view` is missing.
 
-- [ ] **Step 3: Move the methods**
+- [x] **Step 3: Move the methods**
 
 Move each method named in the file-structure list from `class PdfArranger` into `class Document`. Keep the bodies. Change only these references:
 
@@ -1000,13 +1000,13 @@ After the move, this command prints nothing:
 python -c "import ast,pathlib; src=pathlib.Path('pdfarranger/pdfarranger.py').read_text(encoding='utf-8'); tree=ast.parse(src); print('ok')"
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/document.py pdfarranger/pdfarranger.py tests/test_session.py
