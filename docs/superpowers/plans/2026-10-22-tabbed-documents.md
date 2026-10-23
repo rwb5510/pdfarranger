@@ -1036,7 +1036,7 @@ git commit -m "Move page operations onto the document"
   - `PdfArranger.windows: list`
   - `PdfArranger.active_window() -> ArrangerWindow`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_session.py`:
 
@@ -1052,13 +1052,13 @@ class OpenFilesOrderTests(unittest.TestCase):
             self.assertEqual(filenames_for_open(names), names)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.OpenFilesOrderTests -v`
 
 Expected: FAIL with `ImportError` for `pdfarranger.window`.
 
-- [ ] **Step 3: Build the window and the open path**
+- [x] **Step 3: Build the window and the open path**
 
 `filenames_for_open`:
 
@@ -1115,13 +1115,13 @@ self.show_model()
 - `do_activate` creates the first `ArrangerWindow`, appends it to `self.windows`, and shows it. Delete the in-class construction of `self.model` and `self.iconview`.
 - Action callbacks registered on the window forward to `self.focused_document()`. Undo and redo actions are reset from the focused document’s `undomanager` inside `show_model()`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/window.py pdfarranger/document.py pdfarranger/pdfarranger.py pdfarranger/config.py data/menu.ui tests/test_session.py

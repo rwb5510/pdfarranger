@@ -44,6 +44,7 @@ _DEFAULT_ACCELS = [
     ('close', '<Primary>w'),
     ('quit', '<Primary>q'),
     ('new', '<Primary>n'),
+    ('new-tab', '<Primary>t'),
     ('open', '<Primary>o'),
     ('import', '<Primary>i'),
     ('zoom-in', 'plus KP_Add <Primary>plus <Primary>KP_Add'),

@@ -36,6 +36,10 @@ along with PDF Arranger.  If not, see <http://www.gnu.org/licenses/>.
         <attribute name="label" translatable="yes">_New Window</attribute>
         <attribute name="action">win.new</attribute>
       </item>
+      <item>
+        <attribute name="label" translatable="yes">_New Tab</attribute>
+        <attribute name="action">win.new-tab</attribute>
+      </item>
     </section>
     <section>
       <item>

@@ -315,3 +315,48 @@ class DocumentMethodTests(unittest.TestCase):
         for name in names:
             self.assertTrue(callable(getattr(Document, name)), name)
 
+
+class OpenFilesOrderTests(unittest.TestCase):
+    def test_windows_reverses_multi_select_order(self):
+        from pdfarranger.window import filenames_for_open
+        import os
+        names = ["a.pdf", "b.pdf", "c.pdf"]
+        if os.name == "nt":
+            self.assertEqual(filenames_for_open(names), ["c.pdf", "b.pdf", "a.pdf"])
+        else:
+            self.assertEqual(filenames_for_open(names), names)
+
+
+class ArrangerWindowInterfaceTests(unittest.TestCase):
+    def test_window_model_and_tabs(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.config = None
+                self.import_directory = None
+                self.export_directory = None
+                self.windows = []
+                self.last_focused_window = None
+
+            def active_window(self):
+                if self.last_focused_window is not None and self.last_focused_window in self.windows:
+                    return self.last_focused_window
+                return self.windows[0] if self.windows else None
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        app.windows.append(win)
+        self.assertIs(app.active_window(), win)
+        self.assertIsNotNone(win.focused_document())
+        self.assertEqual(len(win.docs), 1)
+
+        win.new_tab()
+        self.assertEqual(len(win.docs), 2)
+        self.assertEqual(win.focused_document().id, win.model.focused_id())
+
+        doc_id = win.model.focused_id()
+        win.close_document(doc_id)
+        self.assertEqual(len(win.docs), 1)
+
+
