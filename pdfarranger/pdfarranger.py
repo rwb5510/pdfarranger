@@ -293,6 +293,7 @@ class PdfArranger(ApplicationBase):
         self.config = Config(DOMAIN)
         self.windows = []
         self.last_focused_window = None
+        self._next_doc_id = 0
 
         self.export_directory = os.path.expanduser('~')
         self.import_directory = None
@@ -306,10 +307,27 @@ class PdfArranger(ApplicationBase):
 
         self.add_arguments()
 
+    def allocate_doc_id(self):
+        self._next_doc_id += 1
+        return self._next_doc_id
+
     def active_window(self):
         if self.last_focused_window is not None and self.last_focused_window in self.windows:
             return self.last_focused_window
         return self.windows[0] if self.windows else None
+
+    def new_window(self):
+        window = ArrangerWindow(self)
+        self.windows.append(window)
+        window.present()
+        return window
+
+    def new_window_for_document(self, document):
+        window = ArrangerWindow(self, empty=False)
+        self.windows.append(window)
+        window.accept_document(document)
+        window.present()
+        return window
 
     def document_by_id(self, doc_id: int):
         for window in self.windows:
@@ -320,7 +338,7 @@ class PdfArranger(ApplicationBase):
     def close_window(self, window):
         if window in self.windows:
             self.windows.remove(window)
-        if window.window:
+        if getattr(window, 'window', None) and hasattr(window.window, 'destroy'):
             window.window.destroy()
         if not self.windows:
             self.close_application()
@@ -437,8 +455,7 @@ class PdfArranger(ApplicationBase):
                 style_provider,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-        window = ArrangerWindow(self)
-        self.windows.append(window)
+        window = self.new_window()
         window.show()
 
     @staticmethod

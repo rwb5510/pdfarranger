@@ -64,13 +64,36 @@ def filenames_for_open(filenames: list) -> list:
     return filenames
 
 
+TAB_MOVE = 1005
+if Gtk is not None:
+    TARGETS_TAB = [
+        Gtk.TargetEntry.new('application/x-pdfarranger-tab', Gtk.TargetFlags.SAME_APP, TAB_MOVE)
+    ]
+else:
+    TARGETS_TAB = []
+
+
 class ArrangerWindow:
-    def __init__(self, app):
+    def __init__(self, app, empty=True):
         self.app = app
+        self.empty = empty
         self.docs = {}
         self.tab_widgets = {}
-        self.model = WindowModel()
+        if app is not None:
+            if hasattr(app, 'allocate_doc_id'):
+                id_allocator = app.allocate_doc_id
+            else:
+                if not hasattr(app, '_next_doc_id'):
+                    app._next_doc_id = 0
+                def _allocator():
+                    app._next_doc_id += 1
+                    return app._next_doc_id
+                id_allocator = _allocator
+        else:
+            id_allocator = None
+        self.model = WindowModel(start_empty=empty, id_allocator=id_allocator)
         self.window = None
+        self._dragging_tab = False
         self.header_bar = None
         self.status_bar = None
         self.status_bar2 = None
@@ -84,10 +107,11 @@ class ArrangerWindow:
         self.popup = None
 
         if Gtk is None:
-            first_id = self.model.focused_id()
-            doc = Document(self.app, first_id)
-            doc.host = self
-            self.docs[first_id] = doc
+            if empty:
+                first_id = self.model.focused_id()
+                doc = Document(self.app, first_id)
+                doc.host = self
+                self.docs[first_id] = doc
             return
 
         self.__create_main_window()
@@ -107,6 +131,20 @@ class ArrangerWindow:
         self.tab_strip.add(self.tab_strip_box)
         self.main_box.pack_start(self.tab_strip, False, True, 0)
         self.main_box.reorder_child(self.tab_strip, 0)
+
+        self.tab_strip.drag_dest_set(
+            Gtk.DestDefaults.ALL,
+            TARGETS_TAB,
+            Gdk.DragAction.MOVE
+        )
+        self.tab_strip.connect("drag-data-received", self._on_tab_strip_drag_data_received)
+
+        self.tab_strip_box.drag_dest_set(
+            Gtk.DestDefaults.ALL,
+            TARGETS_TAB,
+            Gdk.DragAction.MOVE
+        )
+        self.tab_strip_box.connect("drag-data-received", self._on_tab_strip_drag_data_received)
 
         ui_sw = self.uiXML.get_object('scrolledwindow')
         if ui_sw:
@@ -137,18 +175,24 @@ class ArrangerWindow:
         self.window.connect('configure_event', self.window_configure_event)
         self.window.connect('key_press_event', self.window_key_press_event)
 
-        # First document
-        first_id = self.model.focused_id()
-        doc = Document(self.app, first_id)
-        doc.host = self
-        doc.gtk_window = self.window
-        doc.build_view()
-        self.docs[first_id] = doc
-        self._create_tab_widget(doc)
-
         self.__create_actions()
-        self.refresh_document(doc)
-        self.show_model()
+
+        if empty:
+            # First document
+            first_id = self.model.focused_id()
+            doc = Document(self.app, first_id)
+            doc.host = self
+            doc.gtk_window = self.window
+            doc.build_view()
+            self.docs[first_id] = doc
+            self._create_tab_widget(doc)
+
+            self.refresh_document(doc)
+            self.show_model()
+
+    @property
+    def gtk_window(self):
+        return self.window
 
     def __resource_path(self, path):
         if hasattr(self.app, '_PdfArranger__resource_path'):
@@ -203,7 +247,19 @@ class ArrangerWindow:
         label = Gtk.Label()
         label.set_name("pdfarranger-tab-label")
         event_box.add(label)
-        event_box.connect("button-press-event", lambda _w, _e, d_id=doc.id: self._on_tab_clicked(d_id, _e))
+
+        event_box.drag_source_set(
+            Gdk.ModifierType.BUTTON1_MASK,
+            TARGETS_TAB,
+            Gdk.DragAction.MOVE
+        )
+        event_box.connect("drag-begin", self._on_tab_drag_begin, doc.id)
+        event_box.connect("drag-data-get", self._on_tab_drag_data_get, doc.id)
+        event_box.connect("drag-failed", self._on_tab_drag_failed, doc.id)
+        event_box.connect("drag-end", self._on_tab_drag_end, doc.id)
+
+        event_box.connect("button-press-event", lambda _w, _e, d_id=doc.id: self._on_tab_button_press(d_id, _e))
+        event_box.connect("button-release-event", lambda _w, _e, d_id=doc.id: self._on_tab_button_release(d_id, _e))
         tab_box.pack_start(event_box, True, True, 4)
 
         close_btn = Gtk.Button.new_with_label("×")
@@ -214,12 +270,64 @@ class ArrangerWindow:
         tab_box.show_all()
         self.tab_widgets[doc.id] = (label, tab_box)
 
-    def _on_tab_clicked(self, doc_id, event):
-        if event.button == 1:
-            self.model.click_tab(doc_id)
-            self.show_model()
-            return Gdk.EVENT_STOP
+    def _on_tab_button_press(self, doc_id, event):
         return Gdk.EVENT_PROPAGATE
+
+    def _on_tab_button_release(self, doc_id, event):
+        if event.button == 1:
+            if not self._dragging_tab:
+                self.model.click_tab(doc_id)
+                self.show_model()
+                return Gdk.EVENT_STOP
+        return Gdk.EVENT_PROPAGATE
+
+    def _on_tab_drag_begin(self, widget, context, doc_id):
+        self._dragging_tab = True
+
+    def _on_tab_drag_data_get(self, widget, context, selection_data, info, time, doc_id):
+        if info == TAB_MOVE:
+            payload = f"{id(self)}:{doc_id}".encode("utf-8")
+            selection_data.set(selection_data.get_target(), 8, payload)
+
+    def _on_tab_drag_failed(self, widget, context, result, doc_id):
+        self._dragging_tab = False
+        if result == Gtk.DragResult.NO_TARGET:
+            self.detach_document(doc_id)
+            return True
+        return False
+
+    def _on_tab_drag_end(self, widget, context, doc_id):
+        self._dragging_tab = False
+
+    def _on_tab_strip_drag_data_received(self, widget, context, x, y, selection_data, info, time):
+        if info == TAB_MOVE:
+            data = selection_data.get_data()
+            if not data:
+                context.finish(False, False, time)
+                return
+            try:
+                src_win_id_str, doc_id_str = data.decode("utf-8").split(":", 1)
+                src_win_id = int(src_win_id_str)
+                doc_id = int(doc_id_str)
+            except Exception:
+                context.finish(False, False, time)
+                return
+
+            src_win = next((w for w in getattr(self.app, 'windows', []) if id(w) == src_win_id), None)
+            if src_win is None:
+                context.finish(False, False, time)
+                return
+
+            if src_win == self:
+                context.finish(True, False, time)
+                self.show_model()
+                return
+
+            doc, close_source = src_win.detach_document(doc_id, new_window=False)
+            self.accept_document(doc)
+            if close_source and hasattr(self.app, 'close_window'):
+                self.app.close_window(src_win)
+            context.finish(True, False, time)
 
     def focused_document(self) -> Document:
         return self.docs.get(self.model.focused_id())
@@ -350,7 +458,42 @@ class ArrangerWindow:
                 doc.release_renderer()
                 del self.docs[doc_id]
             if doc_id in self.tab_widgets:
-                del self.tab_widgets[doc_id]
+                _lbl, tab_box = self.tab_widgets.pop(doc_id)
+                if tab_box.get_parent():
+                    tab_box.get_parent().remove(tab_box)
+        self.show_model()
+
+    def detach_document(self, doc_id: int, new_window: bool = True):
+        document = self.docs.pop(doc_id)
+        if doc_id in self.tab_widgets:
+            _lbl, tab_box = self.tab_widgets.pop(doc_id)
+            if tab_box.get_parent():
+                tab_box.get_parent().remove(tab_box)
+        _doc_id, close_window = self.model.detach(doc_id)
+        if new_window:
+            other = self.app.new_window_for_document(document)
+            document.gtk_window = other.window
+            document.host = other
+            if close_window:
+                if hasattr(self.app, 'close_window'):
+                    self.app.close_window(self)
+            else:
+                self.show_model()
+            return None
+        else:
+            if not close_window:
+                self.show_model()
+            return document, close_window
+
+    def accept_document(self, document: Document) -> None:
+        self.model.attach(document.id)
+        if hasattr(self.app, '_next_doc_id'):
+            self.app._next_doc_id = max(self.app._next_doc_id, document.id)
+        self.docs[document.id] = document
+        document.host = self
+        document.gtk_window = self.window
+        self._create_tab_widget(document)
+        self.refresh_document(document)
         self.show_model()
 
     def _add_paths(self, receiver: Document, paths: list) -> bool:
@@ -578,6 +721,8 @@ class ArrangerWindow:
         return self.app.on_quit(_widget, _event)
 
     def window_focus_in_out_event(self, _widget=None, _event=None):
+        if hasattr(self.app, 'last_focused_window'):
+            self.app.last_focused_window = self
         doc = self.focused_document()
         text = self.app.clipboard.wait_is_text_available() if self.app.clipboard else False
         image = len(img2pdf_supported_img) > 0 and (self.app.clipboard.wait_is_image_available() if self.app.clipboard else False)

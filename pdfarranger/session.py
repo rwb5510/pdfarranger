@@ -74,18 +74,23 @@ class Pane(Enum):
 
 
 class WindowModel:
-    def __init__(self):
+    def __init__(self, start_empty=True, id_allocator=None):
+        self._id_allocator = id_allocator
         self.next_id = 1
         self.order = []
         self.left_id = None
         self.right_id = None
         self.focused = Pane.LEFT
         self.split = False
-        self.add_document()
+        if start_empty:
+            self.add_document()
 
     def add_document(self) -> int:
-        doc_id = self.next_id
-        self.next_id += 1
+        if self._id_allocator is not None:
+            doc_id = self._id_allocator()
+        else:
+            doc_id = self.next_id
+            self.next_id += 1
         self.order.append(doc_id)
         if self.left_id is None:
             self.left_id = doc_id

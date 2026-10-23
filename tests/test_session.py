@@ -344,6 +344,21 @@ class ArrangerWindowInterfaceTests(unittest.TestCase):
                     return self.last_focused_window
                 return self.windows[0] if self.windows else None
 
+            def new_window(self):
+                w = ArrangerWindow(self)
+                self.windows.append(w)
+                return w
+
+            def new_window_for_document(self, document):
+                w = ArrangerWindow(self, empty=False)
+                self.windows.append(w)
+                w.accept_document(document)
+                return w
+
+            def close_window(self, w):
+                if w in self.windows:
+                    self.windows.remove(w)
+
         app = DummyApp()
         win = ArrangerWindow(app)
         app.windows.append(win)
@@ -358,5 +373,110 @@ class ArrangerWindowInterfaceTests(unittest.TestCase):
         doc_id = win.model.focused_id()
         win.close_document(doc_id)
         self.assertEqual(len(win.docs), 1)
+
+    def test_window_detach_document_creates_new_window(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+            def new_window(self):
+                w = ArrangerWindow(self)
+                self.windows.append(w)
+                return w
+
+            def new_window_for_document(self, document):
+                w = ArrangerWindow(self, empty=False)
+                self.windows.append(w)
+                w.accept_document(document)
+                return w
+
+            def close_window(self, w):
+                if w in self.windows:
+                    self.windows.remove(w)
+
+        app = DummyApp()
+        win = app.new_window()
+        first_id = win.model.focused_id()
+        win.new_tab()
+        second_id = win.model.focused_id()
+        self.assertEqual(len(win.docs), 2)
+
+        # Detach second document: source window stays open
+        win.detach_document(second_id)
+        self.assertEqual(len(win.docs), 1)
+        self.assertEqual(win.model.order, [first_id])
+        self.assertEqual(len(app.windows), 2)
+        new_win = app.windows[1]
+        self.assertEqual(list(new_win.docs.keys()), [second_id])
+        self.assertIs(new_win.focused_document().host, new_win)
+
+        # Detach last remaining document: source window is closed
+        win.detach_document(first_id)
+        self.assertNotIn(win, app.windows)
+        self.assertEqual(len(app.windows), 2)  # new_win from earlier + brand new window for first_id
+
+    def test_accept_document_across_existing_windows(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+            def new_window(self):
+                w = ArrangerWindow(self)
+                self.windows.append(w)
+                return w
+
+            def close_window(self, w):
+                if w in self.windows:
+                    self.windows.remove(w)
+
+        app = DummyApp()
+        win1 = app.new_window()
+        win2 = app.new_window()
+        doc2_id = win2.model.focused_id()
+        doc2 = win2.docs[doc2_id]
+
+        detached_doc, close_source = win2.detach_document(doc2_id, new_window=False)
+        self.assertIs(detached_doc, doc2)
+        self.assertTrue(close_source)
+
+        win1.accept_document(detached_doc)
+        if close_source:
+            app.close_window(win2)
+
+        self.assertIn(doc2_id, win1.docs)
+        self.assertEqual(len(win1.docs), 2)
+        self.assertIs(detached_doc.host, win1)
+        self.assertNotIn(win2, app.windows)
+
+
+class NewWindowHelperTests(unittest.TestCase):
+    def test_detach_plan_for_a_second_document_keeps_the_source_open(self):
+        source = WindowModel()
+        kept = source.focused_id()
+        moving = source.new_tab()
+        doc_id, close_window = source.detach(moving)
+        self.assertEqual(doc_id, moving)
+        self.assertFalse(close_window)
+        self.assertEqual(source.order, [kept])
+
+    def test_window_model_start_empty_false(self):
+        model = WindowModel(start_empty=False)
+        self.assertEqual(model.order, [])
+        self.assertIsNone(model.left_id)
+        self.assertIsNone(model.right_id)
+        self.assertIsNone(model.focused_id())
+
+    def test_window_model_with_id_allocator(self):
+        ids = iter([10, 20, 30])
+        model = WindowModel(id_allocator=lambda: next(ids))
+        self.assertEqual(model.order, [10])
+        second = model.new_tab()
+        self.assertEqual(second, 20)
+        self.assertEqual(model.order, [10, 20])
+
 
 

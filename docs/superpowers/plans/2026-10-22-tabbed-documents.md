@@ -1144,7 +1144,7 @@ git commit -m "Open a second arrangement as a tab"
   - `ArrangerWindow.detach_document(doc_id: int) -> None`
   - `ArrangerWindow.accept_document(document: Document) -> None`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 The session tests in Task 2 already cover detach and attach. Add one test that the application helper does not spawn a process. Append to `tests/test_session.py`:
 
@@ -1162,13 +1162,13 @@ class NewWindowHelperTests(unittest.TestCase):
 
 This test passes as soon as Task 2 is in place. Do not weaken it. The GTK work in this task has no separate pure function. Its check is the dogtail test in Task 14 and this regression test.
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `python -m unittest tests.test_session.NewWindowHelperTests -v`
 
 Expected: PASS (the helper already exists). If it fails, fix `WindowModel.detach` before touching GTK.
 
-- [ ] **Step 3: Implement in-process windows**
+- [x] **Step 3: Implement in-process windows**
 
 Delete `PdfArranger.on_action_new` and every `subprocess.Popen` / `DesktopAppInfo.launch` path that starts another pdfarranger process.
 
@@ -1227,13 +1227,13 @@ A tab dropped on another window’s `tab-strip` calls `source.detach_document` w
 
 The tab drag target id is `TAB_MOVE = 1005`, target name `application/x-pdfarranger-tab`, flags `Gtk.TargetFlags.SAME_APP`. The payload is `str(doc_id).encode()` plus the source window id. The app looks up the document. Do not serialize the pikepdf objects.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/window.py pdfarranger/pdfarranger.py tests/test_session.py
