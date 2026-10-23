@@ -1600,7 +1600,7 @@ git commit -m "Drag pages and drop files between open documents"
   - `ArrangerWindow.close_window() -> bool` True when the window did close
   - `PdfArranger.quit_all() -> None`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 The prompt tests in Task 3 are the contract. Add the window-level ordering the quit path must use. Append:
 
@@ -1619,13 +1619,13 @@ class QuitOrderTests(unittest.TestCase):
         )
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python -m unittest tests.test_session.QuitOrderTests -v`
 
 Expected: FAIL with `ImportError` for `window_prompt_sequence`.
 
-- [ ] **Step 3: Implement prompts and the save gate**
+- [x] **Step 3: Implement prompts and the save gate**
 
 Add to `session.py`:
 
@@ -1653,13 +1653,13 @@ Wire it:
 - `quit_all` uses `window_prompt_sequence` across `app.windows`, focused window first. Cancel returns. Saves run only after every window has answered. Then close every window and `app.quit()`.
 - Ctrl+Q (`win.quit`) calls `quit_all`. The window delete event calls `close_window`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/session.py pdfarranger/window.py pdfarranger/document.py pdfarranger/pdfarranger.py tests/test_session.py

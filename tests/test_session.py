@@ -1222,3 +1222,315 @@ class PageDragTests(unittest.TestCase):
         self.assertEqual(source_doc.undomanager.actions, ["Move"])
         self.assertTrue(source_doc.is_unsaved)
 
+
+class QuitOrderTests(unittest.TestCase):
+    def test_quit_asks_the_focused_window_first(self):
+        from pdfarranger.session import window_prompt_sequence
+        # (window_id, focused_id, unsaved_ids, tab_order)
+        windows = [
+            (10, 1, [1], [1]),
+            (11, 3, [2, 3], [2, 3]),
+        ]
+        self.assertEqual(
+            window_prompt_sequence(windows, focused_window_id=11),
+            [(11, [3, 2]), (10, [1])],
+        )
+
+
+class SaveGateDocumentTests(unittest.TestCase):
+    def test_begin_and_finish_export(self):
+        from pdfarranger.document import Document
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        doc1 = Document(app, 1)
+        doc2 = Document(app, 2)
+
+        self.assertTrue(doc1.begin_export())
+        self.assertEqual(app.save_gate.busy_id, 1)
+        self.assertTrue(doc1.is_busy())
+        self.assertFalse(doc2.is_busy())
+
+        # doc2 cannot begin export while doc1 is busy
+        self.assertFalse(doc2.begin_export())
+
+        # doc1 reentrant begin_export returns True
+        self.assertTrue(doc1.begin_export())
+
+        # finish export releases gate
+        doc1.finish_export()
+        self.assertIsNone(app.save_gate.busy_id)
+        self.assertFalse(doc1.is_busy())
+
+        # Now doc2 can begin export
+        self.assertTrue(doc2.begin_export())
+        self.assertEqual(app.save_gate.busy_id, 2)
+        doc2.finish_export()
+
+    def test_edit_actions_ignored_while_busy(self):
+        from pdfarranger.document import Document
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        doc = Document(app, 1)
+        app.save_gate.start(doc.id)
+        self.assertTrue(doc.is_busy())
+
+        called = []
+        doc.clear_selected = lambda: called.append("clear_selected")
+        doc.read_from_clipboard = lambda: ("data", False)
+        doc.rotate_page = lambda sel, a: called.append("rotate")
+        doc.on_action_delete()
+        doc.on_action_cut()
+        doc.on_action_paste()
+        doc.rotate_page_action(None, 90, None)
+        doc.duplicate(None, None, None)
+        doc.iv_dnd_received_data(None, None, 0, 0, None, 0, 0)
+        doc.sw_dnd_received_data(None, None, 0, 0, None, 0, 0)
+        self.assertEqual(called, [])
+
+
+class WindowClosePromptTests(unittest.TestCase):
+    def test_close_document_busy_sets_post_action(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc_id = win.model.focused_id()
+        doc = win.docs[doc_id]
+        app.save_gate.start(doc_id)
+
+        win.close_document(doc_id)
+        self.assertEqual(doc.post_action, ("close", doc_id))
+        self.assertIn(doc_id, win.docs)
+
+    def test_close_document_unsaved_cancel_aborts(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc_id = win.model.focused_id()
+        doc = win.docs[doc_id]
+        doc.is_unsaved = True
+        win.save_changes_dialog = lambda msg: 2  # Cancel
+
+        win.close_document(doc_id)
+        self.assertIn(doc_id, win.docs)
+        self.assertTrue(doc.is_unsaved)
+
+    def test_close_document_unsaved_discard_closes(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc1_id = win.model.focused_id()
+        win.new_tab()
+        doc2_id = win.model.focused_id()
+        doc2 = win.docs[doc2_id]
+        doc2.is_unsaved = True
+        win.save_changes_dialog = lambda msg: 1  # Don't Save
+
+        win.close_document(doc2_id)
+        self.assertNotIn(doc2_id, win.docs)
+        self.assertEqual(win.model.order, [doc1_id])
+
+    def test_close_document_last_document_emptied(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc1_id = win.model.focused_id()
+        win.docs[doc1_id].is_unsaved = False
+
+        win.close_document(doc1_id)
+        # Old doc closed, new empty doc created
+        self.assertEqual(len(win.docs), 1)
+        new_id = win.model.focused_id()
+        self.assertNotEqual(new_id, doc1_id)
+
+    def test_close_window_busy_sets_post_action(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc_id = win.model.focused_id()
+        app.save_gate.start(doc_id)
+
+        closed = win.close_window()
+        self.assertFalse(closed)
+        self.assertEqual(win.post_action, "close-window")
+
+    def test_close_window_cancel_returns_false_and_keeps_docs(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        doc_id = win.model.focused_id()
+        win.docs[doc_id].is_unsaved = True
+        win.save_changes_dialog = lambda msg: 2  # Cancel
+
+        closed = win.close_window()
+        self.assertFalse(closed)
+        self.assertIn(doc_id, win.docs)
+
+    def test_close_window_saves_and_closes(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        app.windows.append(win)
+        doc_id = win.model.focused_id()
+        doc = win.docs[doc_id]
+        doc.is_unsaved = True
+        doc.save_file = "/path/to/file.pdf"
+        saved = []
+        def mock_save(mode, files):
+            saved.append((mode, files))
+            doc.is_unsaved = False
+        doc.save = mock_save
+
+        win.save_changes_dialog = lambda msg: 3  # Save
+
+        closed = win.close_window()
+        self.assertTrue(closed)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0], ('ALL_TO_SINGLE', ['/path/to/file.pdf']))
+
+    def test_show_model_disables_actions_while_gate_busy(self):
+        from pdfarranger.window import ArrangerWindow
+        from pdfarranger.session import SaveGate
+
+        class DummyApp:
+            def __init__(self):
+                self.save_gate = SaveGate()
+                self.windows = []
+
+        app = DummyApp()
+        win = ArrangerWindow(app)
+        action_states = {}
+        class FakeAction:
+            def __init__(self, name):
+                self.name = name
+            def set_enabled(self, val):
+                action_states[self.name] = val
+
+        class FakeWindow:
+            def lookup_action(self, name):
+                return FakeAction(name)
+
+        win.window = FakeWindow()
+        app.save_gate.start(999)
+        win.show_model()
+
+        for a in ["save", "save-as", "export-selection", "export-all", "print"]:
+            self.assertFalse(action_states.get(a))
+
+
+class QuitAllTests(unittest.TestCase):
+    def test_quit_all_cancel_returns_without_quitting(self):
+        from pdfarranger.pdfarranger import PdfArranger
+        from pdfarranger.window import ArrangerWindow
+
+        app = PdfArranger()
+        app.windows = []
+        win = ArrangerWindow(app)
+        app.windows.append(win)
+        doc_id = win.model.focused_id()
+        win.docs[doc_id].is_unsaved = True
+        win.save_changes_dialog = lambda msg: 2  # Cancel
+
+        app.close_application = lambda: setattr(self, 'app_closed', True)
+        self.app_closed = False
+
+        app.quit_all()
+        self.assertFalse(self.app_closed)
+        self.assertEqual(len(app.windows), 1)
+
+    def test_quit_all_busy_sets_post_action(self):
+        from pdfarranger.pdfarranger import PdfArranger
+        from pdfarranger.window import ArrangerWindow
+
+        app = PdfArranger()
+        app.windows = []
+        win = ArrangerWindow(app)
+        app.windows.append(win)
+        doc_id = win.model.focused_id()
+        doc = win.docs[doc_id]
+        app.save_gate.start(doc_id)
+
+        app.quit_all()
+        self.assertEqual(doc.post_action, ("quit-all",))
+        self.assertEqual(len(app.windows), 1)
+
+    def test_quit_all_discards_and_quits(self):
+        from pdfarranger.pdfarranger import PdfArranger
+        from pdfarranger.window import ArrangerWindow
+
+        app = PdfArranger()
+        app.windows = []
+        win = ArrangerWindow(app)
+        app.windows.append(win)
+        doc_id = win.model.focused_id()
+        win.docs[doc_id].is_unsaved = True
+        win.save_changes_dialog = lambda msg: 1  # Don't Save
+
+        self.app_closed = False
+        app.close_application = lambda: setattr(self, 'app_closed', True)
+
+        app.quit_all()
+        self.assertTrue(self.app_closed)
+        self.assertEqual(len(app.windows), 0)
+
+

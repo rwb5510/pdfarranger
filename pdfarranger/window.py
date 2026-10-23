@@ -44,8 +44,12 @@ except (ImportError, ValueError):
 
 from .session import (
     OpenTarget,
+    PromptChoice,
     WindowModel,
     choose_open_target,
+    prompt_order,
+    resolve_prompts,
+    single_close,
     tab_label,
     tab_tooltip,
 )
@@ -96,6 +100,7 @@ class ArrangerWindow:
         self.model = WindowModel(start_empty=empty, id_allocator=id_allocator)
         self.window = None
         self._dragging_tab = False
+        self.post_action = None
         self.header_bar = None
         self.status_bar = None
         self.status_bar2 = None
@@ -309,6 +314,9 @@ class ArrangerWindow:
         return Gdk.EVENT_PROPAGATE
 
     def _on_tab_button_press(self, doc_id, event):
+        if event.button == 2:
+            self.close_document(doc_id)
+            return Gdk.EVENT_STOP
         return Gdk.EVENT_PROPAGATE
 
     def _on_tab_button_release(self, doc_id, event):
@@ -317,6 +325,9 @@ class ArrangerWindow:
                 self.model.click_tab(doc_id)
                 self.show_model()
                 return Gdk.EVENT_STOP
+        elif event.button == 2:
+            self.close_document(doc_id)
+            return Gdk.EVENT_STOP
         return Gdk.EVENT_PROPAGATE
 
     def _on_tab_drag_begin(self, widget, context, doc_id):
@@ -606,6 +617,13 @@ class ArrangerWindow:
             focused.update_statusbar()
             focused.iv_selection_changed()
 
+        gate_busy = (self.app and hasattr(self.app, 'save_gate') and not self.app.save_gate.can_start())
+        if self.window and gate_busy:
+            for a in ["save", "save-as", "export-selection", "export-all", "print"]:
+                act = self.window.lookup_action(a)
+                if act:
+                    act.set_enabled(False)
+
     def new_tab(self):
         doc_id = self.model.new_tab()
         doc = Document(self.app, doc_id)
@@ -617,31 +635,143 @@ class ArrangerWindow:
         self.refresh_document(doc)
         self.show_model()
 
+    def save_changes_dialog(self, msg):
+        """A dialog which asks if changes should be saved."""
+        if Gtk is None or not self.window:
+            return 2  # Cancel
+        d = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+                              type=Gtk.MessageType.WARNING,
+                              parent=self.window,
+                              message_format=str(msg),
+                              buttons=Gtk.ButtonsType.NONE)
+        d.format_secondary_markup(_("Your changes will be lost if you don't save them."))
+        d.add_buttons(_('Do_n’t Save'), 1, _('_Cancel'), 2, _('_Save'), 3)
+        response = d.run()
+        d.destroy()
+        return response
+
     def close_document(self, doc_id: int):
         doc = self.docs.get(doc_id)
-        outcome = self.model.close_document(doc_id)
-        if outcome == "emptied":
-            new_id = self.model.focused_id()
-            if doc:
+        if not doc:
+            return
+        if self.app and hasattr(self.app, 'save_gate') and self.app.save_gate.busy_id == doc_id:
+            doc.post_action = ("close", doc_id)
+            return
+
+        choice = PromptChoice.DISCARD
+        if doc.is_unsaved:
+            if doc.model and len(doc.model) == 0:
+                msg = _('Discard changes and close?')
+                confirm = self.confirm_dialog(msg, action=_('_Close'))
+                choice = PromptChoice.DISCARD if confirm else PromptChoice.CANCEL
+            else:
+                if doc.save_file:
+                    msg = _('Save changes to “{}” before closing?').format(os.path.basename(doc.save_file))
+                else:
+                    msg = _('Save changes before closing?')
+                resp = self.save_changes_dialog(msg)
+                if resp == 1:
+                    choice = PromptChoice.DISCARD
+                elif resp == 3:
+                    choice = PromptChoice.SAVE
+                else:
+                    choice = PromptChoice.CANCEL
+
+        action = single_close(choice)
+        if action == "abort":
+            return
+        if action == "save_then_close":
+            doc.post_action = ("close", doc_id)
+            doc.save_or_choose()
+            return
+        if action == "discard":
+            outcome = self.model.close_document(doc_id)
+            if outcome == "emptied":
+                new_id = self.model.focused_id()
+                if hasattr(doc, 'destroy'):
+                    doc.destroy()
+                else:
+                    doc.release_renderer()
+                new_doc = Document(self.app, new_id)
+                new_doc.host = self
+                new_doc.gtk_window = self.window
+                new_doc.build_view()
+                self.docs.clear()
+                self.tab_widgets.clear()
+                self.docs[new_id] = new_doc
+                self._create_tab_widget(new_doc)
+                self.refresh_document(new_doc)
+            else:
+                if hasattr(doc, 'destroy'):
+                    doc.destroy()
+                else:
+                    doc.release_renderer()
+                if doc_id in self.docs:
+                    del self.docs[doc_id]
+                if doc_id in self.tab_widgets:
+                    _lbl, tab_box = self.tab_widgets.pop(doc_id)
+                    if tab_box.get_parent():
+                        tab_box.get_parent().remove(tab_box)
+            self.show_model()
+
+    def close_window(self) -> bool:
+        busy_id = getattr(self.app.save_gate, 'busy_id', None) if (self.app and hasattr(self.app, 'save_gate')) else None
+        if busy_id is not None and busy_id in self.docs:
+            self.post_action = "close-window"
+            return False
+
+        unsaved_ids = [d_id for d_id, d in self.docs.items() if d.is_unsaved]
+        if unsaved_ids:
+            order = prompt_order(self.model.focused_id(), unsaved_ids, self.model.order)
+            answers = []
+            for d_id in order:
+                doc = self.docs[d_id]
+                if doc.model and len(doc.model) == 0:
+                    msg = _('Discard changes and close?')
+                    confirm = self.confirm_dialog(msg, action=_('_Close'))
+                    answers.append(PromptChoice.DISCARD if confirm else PromptChoice.CANCEL)
+                else:
+                    if doc.save_file:
+                        msg = _('Save changes to “{}” before closing?').format(os.path.basename(doc.save_file))
+                    else:
+                        msg = _('Save changes before closing?')
+                    resp = self.save_changes_dialog(msg)
+                    if resp == 1:
+                        answers.append(PromptChoice.DISCARD)
+                    elif resp == 3:
+                        answers.append(PromptChoice.SAVE)
+                    else:
+                        answers.append(PromptChoice.CANCEL)
+                if answers[-1] == PromptChoice.CANCEL:
+                    break
+
+            outcome = resolve_prompts(order[:len(answers)], answers)
+            if outcome.aborted:
+                return False
+
+            for d_id in outcome.save_ids:
+                doc = self.docs[d_id]
+                if doc.save_file:
+                    doc.save('ALL_TO_SINGLE', [doc.save_file])
+                else:
+                    doc.choose_export_pdf_name('ALL_TO_SINGLE')
+                if doc.export_process:
+                    doc.export_process.join()
+                if doc.is_unsaved:
+                    return False
+
+        for doc in list(self.docs.values()):
+            if hasattr(doc, 'destroy'):
+                doc.destroy()
+            else:
                 doc.release_renderer()
-            new_doc = Document(self.app, new_id)
-            new_doc.host = self
-            new_doc.gtk_window = self.window
-            new_doc.build_view()
-            self.docs.clear()
-            self.tab_widgets.clear()
-            self.docs[new_id] = new_doc
-            self._create_tab_widget(new_doc)
-            self.refresh_document(new_doc)
-        else:
-            if doc:
-                doc.release_renderer()
-                del self.docs[doc_id]
-            if doc_id in self.tab_widgets:
-                _lbl, tab_box = self.tab_widgets.pop(doc_id)
-                if tab_box.get_parent():
-                    tab_box.get_parent().remove(tab_box)
-        self.show_model()
+        self.docs.clear()
+        self.tab_widgets.clear()
+        if hasattr(self.app, 'close_window'):
+            self.app.close_window(self)
+        elif self.window:
+            self.window.destroy()
+        return True
 
     def detach_document(self, doc_id: int, new_window: bool = True):
         document = self.docs.pop(doc_id)
@@ -767,7 +897,7 @@ class ArrangerWindow:
             ('side-by-side', self.on_action_side_by_side),
             ('focus-other-pane', self.on_action_focus_other_pane),
             ('close', self.on_action_close),
-            ('quit', lambda a, p, u: self.app.on_quit(a, p, u)),
+            ('quit', lambda a, p, u: self.app.quit_all()),
             ('undo', lambda a, p, u: self.focused_document().undomanager.undo()),
             ('redo', lambda a, p, u: self.focused_document().undomanager.redo()),
             ('split', lambda a, p, u: self._forward('split_pages', a, p, u)),
@@ -926,8 +1056,9 @@ class ArrangerWindow:
             ctxt_id = self.status_bar.get_context_id("selected_pages")
             self.status_bar.push(ctxt_id, left_text)
 
-    def on_delete_event(self, _widget, _event):
-        return self.app.on_quit(_widget, _event)
+    def on_delete_event(self, _widget=None, _event=None):
+        closed = self.close_window()
+        return Gdk.EVENT_STOP if not closed else (Gdk.EVENT_STOP if Gdk else False)
 
     def window_focus_in_out_event(self, _widget=None, _event=None):
         if hasattr(self.app, 'last_focused_window'):

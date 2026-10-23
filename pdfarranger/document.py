@@ -216,6 +216,50 @@ class Document:
         if thread is not None:
             thread.quit = True
 
+    def is_busy(self) -> bool:
+        return bool(self.app and hasattr(self.app, 'save_gate') and self.app.save_gate.busy_id == self.id)
+
+    def begin_export(self) -> bool:
+        if not self.app or not hasattr(self.app, 'save_gate'):
+            return True
+        if self.app.save_gate.busy_id == self.id:
+            return True
+        if not self.app.save_gate.can_start():
+            return False
+        self.app.save_gate.start(self.id)
+        if hasattr(self.app, 'windows'):
+            for win in self.app.windows:
+                if hasattr(win, 'show_model'):
+                    win.show_model()
+        return True
+
+    def finish_export(self):
+        if self.app and hasattr(self.app, 'save_gate') and self.app.save_gate.busy_id == self.id:
+            self.app.save_gate.finish()
+            if hasattr(self.app, 'windows'):
+                for win in self.app.windows:
+                    if hasattr(win, 'show_model'):
+                        win.show_model()
+
+    def destroy(self):
+        self.release_renderer()
+        if self.rendering_thread:
+            self.rendering_thread.join(timeout=0.15)
+            self.rendering_thread.pdfqueue = []
+        if self.export_process:
+            self.export_process.join(timeout=0.15)
+            if self.export_process.is_alive():
+                self.export_process.terminate()
+                self.export_process.join()
+        if self.sw and hasattr(self.sw, 'get_parent') and self.sw.get_parent():
+            self.sw.get_parent().remove(self.sw)
+        if self.iconview:
+            self.iconview.unselect_all()
+            if self.iconview.get_model():
+                self.iconview.get_model().clear()
+        self.pdfqueue.clear()
+        malloc_trim()
+
     @property
     def tmp_dir(self):
         return self.app.tmp_dir
@@ -620,8 +664,13 @@ class Document:
         self.update_max_zoom_level()
         GObject.idle_add(self.render)
 
-    def on_action_print(self, _action, _option, _unknown):
-        exporter.PrintOperation(self).run()
+    def on_action_print(self, _action=None, _option=None, _unknown=None):
+        if not self.begin_export():
+            return
+        try:
+            exporter.PrintOperation(self).run()
+        finally:
+            self.finish_export()
 
     @staticmethod
     def set_cellrenderer_data(_column, cell, model, it, _data=None):
@@ -941,10 +990,12 @@ class Document:
                                % os.path.split(files_out[i])[1])
                         replace = self.confirm_dialog(msg, _("Replace"))
                         if not replace:
+                            self.finish_export()
                             return
             self.save(exportmode, files_out)
         else:
             self.post_action = None
+            self.finish_export()
 
     def save_or_choose(self):
         """Saves to the previously exported file or shows the export dialog if
@@ -957,6 +1008,8 @@ class Document:
 
     def save(self, exportmode, files_out):
         """Saves to the specified file."""
+        if not self.begin_export():
+            return
         if exportmode in ['ALL_TO_SINGLE', 'ALL_TO_MULTIPLE']:
             pages = [row[0].duplicate(incl_thumbnail=False) for row in self.model]
         else:
@@ -1013,28 +1066,49 @@ class Document:
         """Check if export finished. Show any messages. Run any post action."""
         if self.export_process.is_alive():
             return True  # continue polling
-        self.set_export_state(False)
-        msg_type = None
-        if not export_msg.empty():
-            msg, msg_type = export_msg.get()
-        if self.export_process.exitcode != 0:
-            sf = _("Saving failed") + f" (Exit code: {self.export_process.exitcode})"
-            msg = sf + "\n\n" + msg if msg_type == Gtk.MessageType.ERROR else sf
-            msg_type = Gtk.MessageType.ERROR
-        if exportmode == 'ALL_TO_SINGLE' and msg_type != Gtk.MessageType.ERROR:
-            self.set_unsaved(False)
-        if msg_type == Gtk.MessageType.ERROR:
-            self.error_message_dialog(msg)
-        elif msg_type == Gtk.MessageType.WARNING and self.app.config.show_save_warnings():
-            self.save_warning_dialog(msg)
-        if not self.is_unsaved:
-            if self.post_action == 'CLEAR_DATA':
-                self.clear_data()
-            elif self.post_action == 'CLOSE_APPLICATION':
-                if self.host and hasattr(self.host, "close_application"):
-
-                    self.host.close_application()
-        self.post_action = None
+        try:
+            self.set_export_state(False)
+            msg_type = None
+            if not export_msg.empty():
+                msg, msg_type = export_msg.get()
+            if self.export_process.exitcode != 0:
+                sf = _("Saving failed") + f" (Exit code: {self.export_process.exitcode})"
+                msg = sf + "\n\n" + msg if msg_type == Gtk.MessageType.ERROR else sf
+                msg_type = Gtk.MessageType.ERROR
+            if exportmode == 'ALL_TO_SINGLE' and msg_type != Gtk.MessageType.ERROR:
+                self.set_unsaved(False)
+            if msg_type == Gtk.MessageType.ERROR:
+                self.error_message_dialog(msg)
+            elif msg_type == Gtk.MessageType.WARNING and self.app.config.show_save_warnings():
+                self.save_warning_dialog(msg)
+            if not self.is_unsaved:
+                if isinstance(self.post_action, tuple) and self.post_action[0] == "close":
+                    doc_id = self.post_action[1]
+                    self.post_action = None
+                    if self.host and hasattr(self.host, "close_document"):
+                        self.host.close_document(doc_id)
+                elif self.post_action == 'close-window' or (isinstance(self.post_action, tuple) and self.post_action[0] == 'close-window'):
+                    self.post_action = None
+                    if self.host and hasattr(self.host, "close_window"):
+                        self.host.close_window()
+                elif self.post_action == 'quit-all' or (isinstance(self.post_action, tuple) and self.post_action[0] == 'quit-all'):
+                    self.post_action = None
+                    if self.app and hasattr(self.app, "quit_all"):
+                        self.app.quit_all()
+                elif self.post_action == 'CLEAR_DATA':
+                    self.post_action = None
+                    self.clear_data()
+                elif self.post_action == 'CLOSE_APPLICATION':
+                    self.post_action = None
+                    if self.host and hasattr(self.host, "close_application"):
+                        self.host.close_application()
+            else:
+                self.post_action = None
+            if self.host and getattr(self.host, 'post_action', None) == 'close-window':
+                self.host.post_action = None
+                self.host.close_window()
+        finally:
+            self.finish_export()
         return False  # cancel timer
 
     def set_export_state(self, enable, message=_("Saving…")):
@@ -1080,6 +1154,8 @@ class Document:
             self.iconview.get_window().set_cursor(cursor)
 
     def choose_export_selection_pdf_name(self, _action, mode, _unknown):
+        if not self.begin_export():
+            return
         exportmodes = {0: 'ALL_TO_SINGLE',
                        1: 'ALL_TO_MULTIPLE',
                        2: 'SELECTED_TO_SINGLE',
@@ -1088,14 +1164,17 @@ class Document:
                        5: 'SELECTED_TO_JPG',
                        6: 'SELECTED_TO_PDF_PNG',
                        7: 'SELECTED_TO_PDF_JPG'}
-        exportmode = exportmodes[mode.get_int32()]
-        if ImageExporter is None and mode.get_int32() in [4, 5, 6, 7]:
+        exportmode = exportmodes[mode.get_int32() if hasattr(mode, 'get_int32') else mode]
+        if ImageExporter is None and (mode.get_int32() if hasattr(mode, 'get_int32') else mode) in [4, 5, 6, 7]:
             msg = _("Img2pdf support missing.")
             self.error_message_dialog(msg)
+            self.finish_export()
             return
         self.choose_export_pdf_name(exportmode)
 
     def on_action_export_all(self, _action, _param, _unknown):
+        if not self.begin_export():
+            return
         self.choose_export_pdf_name('ALL_TO_MULTIPLE')
 
     def clear_selected(self, add_to_undomanager=True):
@@ -1219,26 +1298,31 @@ class Document:
             scroll_path = Gtk.TreePath.new_from_indices([iscroll])
             self.iconview.scroll_to_path(scroll_path, False, 0, 0)
 
-    def on_action_delete(self, _action, _parameter, _unknown):
+    def on_action_delete(self, _action=None, _parameter=None, _unknown=None):
         """Removes the selected elements in the IconView"""
-
+        if self.is_busy():
+            return
         self.clear_selected()
 
-    def on_action_cut(self, _action, _param, _unknown):
+    def on_action_cut(self, _action=None, _param=None, _unknown=None):
         """Cut selected pages to clipboard."""
+        if self.is_busy():
+            return
         data = self.copy_pages()
         self.app.clipboard.set_text('pdfarranger-clipboard\n' + data, -1)
         self.clear_selected()
         self.gtk_window.lookup_action("paste").set_enabled(True)
 
-    def on_action_copy(self, _action, _param, _unknown):
+    def on_action_copy(self, _action=None, _param=None, _unknown=None):
         """Copy selected pages to clipboard."""
         data = self.copy_pages()
         self.app.clipboard.set_text('pdfarranger-clipboard\n' + data, -1)
         self.gtk_window.lookup_action("paste").set_enabled(True)
 
-    def on_action_paste(self, _action, mode, _unknown):
+    def on_action_paste(self, _action=None, mode=None, _unknown=None):
         """Paste pages, file paths or an image from clipboard."""
+        if self.is_busy():
+            return
         data, data_is_filepaths = self.read_from_clipboard()
         if not data:
             return
@@ -1695,7 +1779,8 @@ class Document:
     def iv_dnd_received_data(self, iconview, context, _x, _y,
                              selection_data, _target_id, etime):
         """Handles received data by drag and drop in iconview"""
-
+        if self.is_busy():
+            return
         model = iconview.get_model()
         raw_data = selection_data.get_data()
         if not raw_data:
@@ -2241,6 +2326,8 @@ class Document:
     def sw_dnd_received_data(self, _scrolledwindow, _context, _x, _y,
                              selection_data, target_id, _etime):
         """Handles received data by drag and drop in scrolledwindow"""
+        if self.is_busy():
+            return
         if target_id == self.TEXT_URI_LIST:
             pageadder = PageAdder(self)
             load_password = (len(self.pdfqueue) == 0) and self.password is None
@@ -2425,10 +2512,12 @@ class Document:
             path = selection[len(selection) // 2]
             self.iconview.scroll_to_path(path, center, 0.5, 0.5)
 
-    def rotate_page_action(self, _action, angle, _unknown):
+    def rotate_page_action(self, _action=None, angle=None, _unknown=None):
         """Rotates the selected page in the IconView"""
+        if self.is_busy():
+            return
         self.undomanager.commit("Rotate")
-        angle = angle.get_int32()
+        angle = angle.get_int32() if hasattr(angle, 'get_int32') else angle
         selection = self.iconview.get_selected_items()
         if self.rotate_page(selection, angle):
             self.set_unsaved(True)
@@ -2767,8 +2856,10 @@ class Document:
         self.update_iconview_geometry()
         return changed
 
-    def duplicate(self, _action, _parameter, _unknown):
+    def duplicate(self, _action=None, _parameter=None, _unknown=None):
         """Duplicates the selected elements"""
+        if self.is_busy():
+            return
 
         self.set_unsaved(True)
         self.undomanager.commit("Duplicate")

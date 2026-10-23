@@ -320,3 +320,14 @@ class SaveGate:
     def finish(self) -> None:
         self.busy_id = None
 
+
+def window_prompt_sequence(windows: list, focused_window_id: int) -> list:
+    """windows items are (window_id, focused_id, unsaved_ids, tab_order)."""
+    ordered = sorted(windows, key=lambda item: 0 if item[0] == focused_window_id else 1)
+    sequence = []
+    for window_id, focused_id, unsaved_ids, tab_order in ordered:
+        docs = prompt_order(focused_id, unsaved_ids, tab_order)
+        if docs:
+            sequence.append((window_id, docs))
+    return sequence
+

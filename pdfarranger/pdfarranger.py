@@ -194,7 +194,7 @@ gettext.bindtextdomain(DOMAIN, localedir)
 gettext.textdomain(DOMAIN)
 _ = gettext.gettext
 
-from .session import plan_launch
+from .session import plan_launch, SaveGate, window_prompt_sequence
 from .document import Document
 from .window import ArrangerWindow
 from .win32ipc import Win32Handoff, gtk_unique_is_enough
@@ -334,6 +334,7 @@ class PdfArranger(ApplicationBase):
         self.last_focused_window = None
         self._next_doc_id = 0
         self.handoff = None
+        self.save_gate = SaveGate()
 
         self.export_directory = os.path.expanduser('~')
         self.import_directory = None
@@ -607,10 +608,75 @@ class PdfArranger(ApplicationBase):
         paths = [f.get_path() if hasattr(f, 'get_path') else str(f) for f in files]
         self.open_launched_files(False, paths)
 
+    def quit_all(self):
+        if hasattr(self, 'save_gate') and self.save_gate.busy_id is not None:
+            busy_doc = self.document_by_id(self.save_gate.busy_id)
+            if busy_doc:
+                busy_doc.post_action = ("quit-all",)
+            return
+
+        active = self.active_window()
+        active_id = id(active) if active else (id(self.windows[0]) if self.windows else 0)
+        windows_info = [
+            (id(w), w.model.focused_id(), [d_id for d_id, d in w.docs.items() if d.is_unsaved], list(w.model.order))
+            for w in self.windows
+        ]
+        sequence = window_prompt_sequence(windows_info, active_id)
+
+        save_plan = []
+        for win_id, doc_ids in sequence:
+            win = next((w for w in self.windows if id(w) == win_id), None)
+            if not win:
+                continue
+            for doc_id in doc_ids:
+                doc = win.docs.get(doc_id)
+                if not doc or not doc.is_unsaved:
+                    continue
+                if doc.model and len(doc.model) == 0:
+                    msg = _('Discard changes and quit?')
+                    confirm = win.confirm_dialog(msg, action=_('_Quit'))
+                    if not confirm:
+                        return
+                else:
+                    if doc.save_file:
+                        msg = _('Save changes to “{}” before quitting?').format(os.path.basename(doc.save_file))
+                    else:
+                        msg = _('Save changes before quitting?')
+                    resp = win.save_changes_dialog(msg)
+                    if resp == 1:  # Don't Save / DISCARD
+                        pass
+                    elif resp == 3:  # Save / SAVE
+                        save_plan.append((win, doc))
+                    else:  # Cancel / CANCEL
+                        return
+
+        for win, doc in save_plan:
+            if doc.save_file:
+                doc.save('ALL_TO_SINGLE', [doc.save_file])
+            else:
+                doc.choose_export_pdf_name('ALL_TO_SINGLE')
+            if doc.export_process:
+                doc.export_process.join()
+            if doc.is_unsaved:
+                return
+
+        for win in list(self.windows):
+            for doc in list(win.docs.values()):
+                if hasattr(doc, 'destroy'):
+                    doc.destroy()
+                else:
+                    doc.release_renderer()
+            win.docs.clear()
+            win.tab_widgets.clear()
+            if getattr(win, 'window', None) and hasattr(win.window, 'destroy'):
+                win.window.destroy()
+        self.windows.clear()
+        self.close_application()
+
     def on_quit(self, _action=None, _param=None, _unknown=None):
         if self.disable_quit:
             return Gdk.EVENT_STOP if Gdk else False
-        self.close_application()
+        self.quit_all()
         return Gdk.EVENT_STOP if Gdk else False
 
     def close_application(self, _widget=None, _event=None, _data=None):
