@@ -1252,7 +1252,7 @@ git commit -m "Move tabs between windows in one process"
 - Consumes: `plan_launch`, `LaunchPlan`, `ArrangerWindow.open_files`
 - Produces: `PdfArranger.do_command_line(command_line) -> int` and `PdfArranger.open_launched_files(remote: bool, files: list[str]) -> None`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plan_launch` is already tested. Add a thin wrapper test that records the call the command-line handler must make. Append to `tests/test_session.py`:
 
@@ -1264,13 +1264,13 @@ class CommandLineRoutingTests(unittest.TestCase):
         self.assertEqual(plan.files, ["notes.pdf"])
 ```
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `python -m unittest tests.test_session.CommandLineRoutingTests -v`
 
 Expected: PASS if Task 1 is complete. If it fails, stop and fix `plan_launch`.
 
-- [ ] **Step 3: Route launches through the running process**
+- [x] **Step 3: Route launches through the running process**
 
 In `PdfArranger.__init__`, set flags to `Gio.ApplicationFlags.HANDLES_COMMAND_LINE` only.
 
@@ -1310,13 +1310,13 @@ def open_launched_files(self, remote: bool, files: list) -> None:
 
 Startup with files: `get_is_remote()` is false, `plan.action` is `"fill"`, and `open_files` fills the empty first document.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python -m unittest tests.test_session tests.test_core -v`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pdfarranger/pdfarranger.py tests/test_session.py

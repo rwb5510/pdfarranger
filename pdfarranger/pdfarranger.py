@@ -136,8 +136,19 @@ except (ImportError, ValueError):
     Pango = None
     GTK_VERSION = "0.0.0"
 
-from .config import Config
-from .core import Dims, Sides, _img_to_pdf, IMG2PDF_VERSION, POPPLER_VERSION
+try:
+    from .config import Config
+except (ImportError, ValueError):
+    Config = None
+
+try:
+    from .core import Dims, Sides, _img_to_pdf, IMG2PDF_VERSION, POPPLER_VERSION
+except (ImportError, ValueError):
+    Dims = None
+    Sides = None
+    _img_to_pdf = None
+    IMG2PDF_VERSION = "0.0.0"
+    POPPLER_VERSION = "0.0.0"
 
 PIKEPDF_VERSION = pikepdf.__version__
 LIBQPDF_VERSION = pikepdf.__libqpdf_version__
@@ -165,7 +176,7 @@ if not check_gtk_schema_exists():
     print('ERROR: Found no schema files. You may need to set GSETTINGS_SCHEMA_DIR.', file=sys.stderr)
 
 def _set_language_locale():
-    lang = Config(DOMAIN).language()
+    lang = Config(DOMAIN).language() if Config else None
     if os.name == 'nt':
         if not lang:
             winlang = ctypes.windll.kernel32.GetUserDefaultUILanguage()
@@ -183,22 +194,41 @@ gettext.bindtextdomain(DOMAIN, localedir)
 gettext.textdomain(DOMAIN)
 _ = gettext.gettext
 
-from . import undo
-from . import exporter
-from . import metadata
-from . import pageutils
-from . import splitter
-from .search import SearchBarWidget
-from .iconview import CellRendererImage, IconviewCursor, IconviewDragSelect, IconviewPanView
+from .session import plan_launch
 from .document import Document
 from .window import ArrangerWindow
-from .core import img2pdf_supported_img, PageAdder, PDFDocError, PDFRenderer
-if 'image/png' in img2pdf_supported_img and 'image/jpeg' in img2pdf_supported_img:
-    from .image_exporter import ImageExporter
-else:
+
+try:
+    from . import undo
+    from . import exporter
+    from . import metadata
+    from . import pageutils
+    from . import splitter
+    from .search import SearchBarWidget
+    from .iconview import CellRendererImage, IconviewCursor, IconviewDragSelect, IconviewPanView
+    from .core import img2pdf_supported_img, PageAdder, PDFDocError, PDFRenderer
+    if 'image/png' in img2pdf_supported_img and 'image/jpeg' in img2pdf_supported_img:
+        from .image_exporter import ImageExporter
+    else:
+        ImageExporter = None
+    if GObject and CellRendererImage:
+        GObject.type_register(CellRendererImage)
+except (ImportError, ValueError):
+    undo = None
+    exporter = None
+    metadata = None
+    pageutils = None
+    splitter = None
+    SearchBarWidget = None
+    CellRendererImage = None
+    IconviewCursor = None
+    IconviewDragSelect = None
+    IconviewPanView = None
+    img2pdf_supported_img = []
+    PageAdder = None
+    PDFDocError = Exception
+    PDFRenderer = None
     ImageExporter = None
-if GObject and CellRendererImage:
-    GObject.type_register(CellRendererImage)
 
 
 def _install_workaround_bug29():
@@ -277,20 +307,24 @@ class PdfArranger(ApplicationBase):
                                       MODEL_ROW_EXTERN)] if Gtk else []
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, application_id="com.github.jeromerobert.pdfarranger",
-                         flags=Gio.ApplicationFlags.NON_UNIQUE |
-                            Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
-                         **kwargs)
+        if Gtk:
+            flags = Gio.ApplicationFlags.HANDLES_COMMAND_LINE if Gio else 0
+            super().__init__(*args, application_id="com.github.jeromerobert.pdfarranger",
+                             flags=flags,
+                             **kwargs)
+        else:
+            super().__init__()
 
-        GLib.set_application_name(APPNAME)
-        GLib.set_prgname('com.github.jeromerobert.pdfarranger')
+        if GLib:
+            GLib.set_application_name(APPNAME)
+            GLib.set_prgname('com.github.jeromerobert.pdfarranger')
 
         # Create the temporary directory
         self.tmp_dir = tempfile.mkdtemp(DOMAIN)
         os.chmod(self.tmp_dir, 0o700)
 
         # Defining instance attributes
-        self.config = Config(DOMAIN)
+        self.config = Config(DOMAIN) if Config else None
         self.windows = []
         self.last_focused_window = None
         self._next_doc_id = 0
@@ -299,7 +333,10 @@ class PdfArranger(ApplicationBase):
         self.import_directory = None
         self.nfile = 0
         self.disable_quit = False
-        multiprocessing.set_start_method('spawn')
+        try:
+            multiprocessing.set_start_method('spawn')
+        except RuntimeError:
+            pass
         self.quit_flag = multiprocessing.Event()
 
         # Clipboard for cut copy paste
@@ -343,7 +380,20 @@ class PdfArranger(ApplicationBase):
         if not self.windows:
             self.close_application()
 
+    def get_windows(self):
+        if hasattr(super(), 'get_windows'):
+            return super().get_windows()
+        return self.windows
+
+    def activate(self):
+        if hasattr(super(), 'activate'):
+            super().activate()
+        else:
+            self.do_activate()
+
     def add_arguments(self):
+        if not GLib:
+            return
         self.set_option_context_summary(_(
            "PDF Arranger is a small python-gtk application, which helps the "
            "user to merge or split pdf documents and rotate, crop and rearrange "
@@ -503,21 +553,41 @@ class PdfArranger(ApplicationBase):
             print("OS_Version-" + self.get_os_version())
             return 0
 
-        self.activate()
+        files = []
+        remaining = options.lookup_value(GLib.OPTION_REMAINING) if GLib else (options.lookup_value(None) if hasattr(options, 'lookup_value') else None)
+        if remaining is not None:
+            for item in remaining:
+                file_obj = command_line.create_file_for_arg(item)
+                path = file_obj.get_path() if hasattr(file_obj, 'get_path') else str(file_obj)
+                if path:
+                    files.append(path)
 
-        if options.lookup_value(GLib.OPTION_REMAINING):
-            files = [Gio.File.new_for_commandline_arg(i)
-                    for i in options.lookup_value(GLib.OPTION_REMAINING)]
+        if not self.get_windows():
+            self.activate()
 
-            GObject.idle_add(self.add_files, files)
-
+        self.open_launched_files(command_line.get_is_remote(), files)
         return 0
+
+    def open_launched_files(self, remote: bool, files: list) -> None:
+        window = self.active_window()
+        occupied = window.focused_document().occupied() if (window and window.docs) else False
+        plan = plan_launch(remote, files, occupied)
+        if plan.action == "raise":
+            if window:
+                window.present()
+            return
+        if plan.action == "fill" and not plan.files and not remote:
+            if window:
+                window.present()
+            return
+        if window:
+            window.open_files(plan.files)
+            window.present()
 
     def add_files(self, files):
         """Add files passed as command line arguments."""
-        window = self.active_window()
-        if window:
-            window.open_files([f.get_path() if hasattr(f, 'get_path') else f for f in files])
+        paths = [f.get_path() if hasattr(f, 'get_path') else str(f) for f in files]
+        self.open_launched_files(False, paths)
 
     def on_quit(self, _action=None, _param=None, _unknown=None):
         if self.disable_quit:
@@ -563,7 +633,7 @@ class PdfArranger(ApplicationBase):
 
 
 
-class EncryptionPasswordDialog(Gtk.Dialog):
+class EncryptionPasswordDialog(Gtk.Dialog if Gtk else object):
     def __init__(self, parent, password=None):
         super().__init__(
             title=_("Set Password"),

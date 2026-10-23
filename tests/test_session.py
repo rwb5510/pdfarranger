@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from pdfarranger.session import (
@@ -479,4 +480,156 @@ class NewWindowHelperTests(unittest.TestCase):
         self.assertEqual(model.order, [10, 20])
 
 
+class CommandLineRoutingTests(unittest.TestCase):
+    def test_remote_occupied_window_is_a_new_tab(self):
+        plan = plan_launch(True, ["notes.pdf"], True)
+        self.assertEqual(plan.action, "new_tab")
+        self.assertEqual(plan.files, ["notes.pdf"])
+
+
+class PdfArrangerCommandLineTests(unittest.TestCase):
+    def setUp(self):
+        from pdfarranger.pdfarranger import PdfArranger
+
+        class FakeDoc:
+            def __init__(self, occupied=False):
+                self._occupied = occupied
+
+            def occupied(self):
+                return self._occupied
+
+        class FakeWindow:
+            def __init__(self, occupied=False):
+                self.doc = FakeDoc(occupied)
+                self.docs = {1: self.doc}
+                self.opened = []
+                self.presented = False
+
+            def focused_document(self):
+                return self.doc
+
+            def open_files(self, files):
+                self.opened.append(list(files))
+
+            def present(self):
+                self.presented = True
+
+        self.FakeDoc = FakeDoc
+        self.FakeWindow = FakeWindow
+        self.app = PdfArranger()
+        self.app.windows = []
+        self.activated = False
+        self.app.activate = lambda: setattr(self, 'activated', True)
+
+    def tearDown(self):
+        if hasattr(self.app, 'tmp_dir') and os.path.isdir(self.app.tmp_dir):
+            import shutil
+            shutil.rmtree(self.app.tmp_dir, ignore_errors=True)
+
+    def test_open_launched_files_raise_when_remote_and_no_files(self):
+        win = self.FakeWindow(occupied=True)
+        self.app.windows = [win]
+        self.app.open_launched_files(remote=True, files=[])
+        self.assertTrue(win.presented)
+        self.assertEqual(win.opened, [])
+
+    def test_open_launched_files_startup_no_files_just_presents(self):
+        win = self.FakeWindow(occupied=False)
+        self.app.windows = [win]
+        self.app.open_launched_files(remote=False, files=[])
+        self.assertTrue(win.presented)
+        self.assertEqual(win.opened, [])
+
+    def test_open_launched_files_routes_files_to_open_files(self):
+        win = self.FakeWindow(occupied=True)
+        self.app.windows = [win]
+        self.app.open_launched_files(remote=True, files=["a.pdf", "b.pdf"])
+        self.assertTrue(win.presented)
+        self.assertEqual(win.opened, [["a.pdf", "b.pdf"]])
+
+    def test_do_command_line_version_returns_zero_without_activating(self):
+        from unittest.mock import patch
+
+        class FakeOptions:
+            def contains(self, key):
+                return key == "version"
+
+        class FakeCommandLine:
+            def get_options_dict(self):
+                return FakeOptions()
+
+        with patch('builtins.print'):
+            ret = self.app.do_command_line(FakeCommandLine())
+        self.assertEqual(ret, 0)
+        self.assertFalse(self.activated)
+
+    def test_do_command_line_activates_if_no_windows(self):
+        class FakeFile:
+            def __init__(self, path):
+                self._path = path
+
+            def get_path(self):
+                return self._path
+
+        class FakeOptions:
+            def contains(self, key):
+                return False
+
+            def lookup_value(self, key):
+                return ["doc1.pdf", "doc2.pdf"]
+
+        class FakeCommandLine:
+            def get_options_dict(self):
+                return FakeOptions()
+
+            def create_file_for_arg(self, arg):
+                return FakeFile("/absolute/" + arg)
+
+            def get_is_remote(self):
+                return False
+
+        win = self.FakeWindow(occupied=False)
+        def mock_activate():
+            self.activated = True
+            self.app.windows.append(win)
+
+        self.app.activate = mock_activate
+        ret = self.app.do_command_line(FakeCommandLine())
+        self.assertEqual(ret, 0)
+        self.assertTrue(self.activated)
+        self.assertEqual(win.opened, [["/absolute/doc1.pdf", "/absolute/doc2.pdf"]])
+        self.assertTrue(win.presented)
+
+    def test_do_command_line_remote_does_not_activate_if_window_exists(self):
+        class FakeFile:
+            def __init__(self, path):
+                self._path = path
+
+            def get_path(self):
+                return self._path
+
+        class FakeOptions:
+            def contains(self, key):
+                return False
+
+            def lookup_value(self, key):
+                return ["remote.pdf"]
+
+        class FakeCommandLine:
+            def get_options_dict(self):
+                return FakeOptions()
+
+            def create_file_for_arg(self, arg):
+                return FakeFile("/remote/" + arg)
+
+            def get_is_remote(self):
+                return True
+
+        win = self.FakeWindow(occupied=True)
+        self.app.windows = [win]
+        ret = self.app.do_command_line(FakeCommandLine())
+        self.assertEqual(ret, 0)
+        self.assertFalse(self.activated)
+        self.assertEqual(win.opened, [["/remote/remote.pdf"]])
+        self.assertTrue(win.presented)
 
