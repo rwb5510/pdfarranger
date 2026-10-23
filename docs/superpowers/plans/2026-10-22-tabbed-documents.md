@@ -1742,7 +1742,7 @@ git commit -m "Keep a separate find query for each document"
 **Interfaces:**
 - Consumes: the running app from Tasks 6–13. Tab labels use widget name `pdfarranger-tab-label`.
 
-- [ ] **Step 1: Update TestBatch09 and add TestBatch17**
+- [x] **Step 1: Update TestBatch09 and add TestBatch17**
 
 Replace `TestBatch09.test_03_open_again` so it no longer waits for a second application:
 
@@ -1815,13 +1815,13 @@ class TestBatch17(PdfArrangerTest):
 
 In `TESTING.md`, under the `test.py` bullet, add: `TestBatch09` opens a second file as another tab in the same process. `TestBatch17` covers startup merge, import into the focused tab, and side by side.
 
-- [ ] **Step 2: Run the headless tests**
+- [x] **Step 2: Run the headless tests**
 
 Run: `python -m unittest tests.test_session tests.test_core tests.test_exporter -v`
 
 Expected: PASS
 
-- [ ] **Step 3: Run the GUI tests on Linux**
+- [x] **Step 3: Run the GUI tests on Linux**
 
 Run, when dogtail and a display or Xvfb are available:
 
@@ -1831,7 +1831,7 @@ python -X tracemalloc -u -m unittest -v tests.test.TestBatch09 tests.test.TestBa
 
 Expected: PASS. On Windows without dogtail, skip this command and record that it was not run.
 
-- [ ] **Step 4: Manual Windows check**
+- [x] **Step 4: Manual Windows check**
 
 On the MSYS2 build:
 
@@ -1842,7 +1842,7 @@ On the MSYS2 build:
 5. Drag a tab out of the strip. Expect a second window. Drag the tab back onto the first strip.
 6. Close an unsaved tab. Expect the save prompt to use that tab’s name. Cancel. Expect the tab to stay.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test.py TESTING.md

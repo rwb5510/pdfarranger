@@ -2,6 +2,8 @@
 
 The code is tested using [unittest](https://docs.python.org/3/library/unittest.html) and [dogtail](https://gitlab.com/dogtail/dogtail). Currently there are 3 files:
 1. `test.py` which test the GUI
+   - `TestBatch09` opens a second file as another tab in the same process.
+   - `TestBatch17` covers startup merge, import into the focused tab, and side by side.
 2. `test_core.py` which test Page and LayerPage class
 3. `test_exporter.py` which test that exported pdf is as expected
 
