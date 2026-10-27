@@ -596,7 +596,8 @@ class PdfArrangerCommandLineTests(unittest.TestCase):
             self.app.windows.append(win)
 
         self.app.activate = mock_activate
-        ret = self.app.do_command_line(FakeCommandLine())
+        with patch("pdfarranger.pdfarranger.gtk_unique_is_enough", return_value=True):
+            ret = self.app.do_command_line(FakeCommandLine())
         self.assertEqual(ret, 0)
         self.assertTrue(self.activated)
         self.assertEqual(win.opened, [["/absolute/doc1.pdf", "/absolute/doc2.pdf"]])
@@ -629,7 +630,8 @@ class PdfArrangerCommandLineTests(unittest.TestCase):
 
         win = self.FakeWindow(occupied=True)
         self.app.windows = [win]
-        ret = self.app.do_command_line(FakeCommandLine())
+        with patch("pdfarranger.pdfarranger.gtk_unique_is_enough", return_value=True):
+            ret = self.app.do_command_line(FakeCommandLine())
         self.assertEqual(ret, 0)
         self.assertFalse(self.activated)
         self.assertEqual(win.opened, [["/remote/remote.pdf"]])
@@ -694,20 +696,65 @@ class PdfArrangerCommandLineTests(unittest.TestCase):
 
         with patch("pdfarranger.pdfarranger.gtk_unique_is_enough", return_value=False):
             with patch("pdfarranger.pdfarranger.Win32Handoff.submit", return_value=False):
-                with patch("pdfarranger.pdfarranger.Win32Handoff.start") as mock_start:
-                    win = self.FakeWindow(occupied=False)
-                    self.app.activate = lambda: self.app.windows.append(win)
+                with patch("pdfarranger.pdfarranger.Win32Handoff.claim", return_value=True):
+                    with patch("pdfarranger.pdfarranger.Win32Handoff.start") as mock_start:
+                        win = self.FakeWindow(occupied=False)
+                        self.app.activate = lambda: self.app.windows.append(win)
+                        ret = self.app.do_command_line(FakeCommandLine())
+                        self.assertEqual(ret, 0)
+                        mock_start.assert_called_once()
+                        self.assertIsNotNone(self.app.handoff)
+                        self.assertEqual(win.opened, [["/primary/first.pdf"]])
+
+    def test_do_command_line_waits_when_another_instance_claimed_first(self):
+        class FakeFile:
+            def __init__(self, path):
+                self._path = path
+
+            def get_path(self):
+                return self._path
+
+        class FakeOptions:
+            def contains(self, key):
+                return False
+
+            def lookup_value(self, key):
+                return ["other.pdf"]
+
+        class FakeCommandLine:
+            def get_options_dict(self):
+                return FakeOptions()
+
+            def create_file_for_arg(self, arg):
+                return FakeFile("/queued/" + arg)
+
+            def get_is_remote(self):
+                return False
+
+        calls = []
+
+        def submit(files, wait=0.0, mutex_name=None):
+            calls.append((list(files), wait))
+            return wait > 0
+
+        with patch("pdfarranger.pdfarranger.gtk_unique_is_enough", return_value=False):
+            with patch("pdfarranger.pdfarranger.Win32Handoff.submit", side_effect=submit):
+                with patch("pdfarranger.pdfarranger.Win32Handoff.claim", return_value=False):
                     ret = self.app.do_command_line(FakeCommandLine())
-                    self.assertEqual(ret, 0)
-                    mock_start.assert_called_once()
-                    self.assertIsNotNone(self.app.handoff)
-                    self.assertEqual(win.opened, [["/primary/first.pdf"]])
+        self.assertEqual(ret, 0)
+        self.assertFalse(self.activated)
+        self.assertIsNone(self.app.handoff)
+        self.assertEqual(calls[0], (["/queued/other.pdf"], 0.0))
+        self.assertGreater(calls[1][1], 0)
+        self.assertEqual(calls[1][0], ["/queued/other.pdf"])
 
 
 
 import socket
 import tempfile
 import threading
+import time
+import uuid
 from unittest.mock import patch
 
 from pdfarranger.win32ipc import (
@@ -731,7 +778,7 @@ class GtkUniqueCheckTests(unittest.TestCase):
             with patch("pdfarranger.win32ipc.os.name", "posix"):
                 self.assertTrue(gtk_unique_is_enough())
 
-    def test_windows_glib_version_check(self):
+    def test_windows_always_uses_the_process_handoff(self):
         class FakeGLib:
             def __init__(self, major, minor):
                 self.MAJOR_VERSION = major
@@ -744,9 +791,9 @@ class GtkUniqueCheckTests(unittest.TestCase):
                 with patch("pdfarranger.win32ipc.GLib", FakeGLib(2, 42)):
                     self.assertFalse(gtk_unique_is_enough())
                 with patch("pdfarranger.win32ipc.GLib", FakeGLib(2, 44)):
-                    self.assertTrue(gtk_unique_is_enough())
-                with patch("pdfarranger.win32ipc.GLib", FakeGLib(3, 0)):
-                    self.assertTrue(gtk_unique_is_enough())
+                    self.assertFalse(gtk_unique_is_enough())
+                with patch("pdfarranger.win32ipc.GLib", FakeGLib(2, 80)):
+                    self.assertFalse(gtk_unique_is_enough())
                 with patch("pdfarranger.win32ipc.GLib", None):
                     self.assertFalse(gtk_unique_is_enough())
 
@@ -777,6 +824,60 @@ class Win32HandoffTests(unittest.TestCase):
                 f.write("127.0.0.1:59999\n")
             self.assertFalse(Win32Handoff.submit(["doc.pdf"], directory=tmpdir))
             self.assertFalse(os.path.exists(lock_file))
+
+    def test_only_one_launch_claims_the_instance(self):
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first = Win32Handoff(directory=tmpdir, mutex_name=name)
+            second = Win32Handoff(directory=tmpdir, mutex_name=name)
+            try:
+                self.assertTrue(first.claim())
+                self.assertFalse(second.claim())
+            finally:
+                first.stop()
+                second.stop()
+
+    def test_submit_does_not_wait_when_nobody_claimed_the_instance(self):
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
+        with tempfile.TemporaryDirectory() as tmpdir:
+            started = time.monotonic()
+            delivered = Win32Handoff.submit(
+                ["missing.pdf"], directory=tmpdir, wait=2.0, mutex_name=name
+            )
+            elapsed = time.monotonic() - started
+        self.assertFalse(delivered)
+        self.assertLess(elapsed, 0.5)
+
+    def test_second_launch_waits_for_the_port_then_submits(self):
+        received = []
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
+        with tempfile.TemporaryDirectory() as tmpdir:
+            primary = Win32Handoff(
+                lambda files: received.append(list(files)),
+                directory=tmpdir,
+                mutex_name=name,
+            )
+            try:
+                self.assertTrue(primary.claim())
+                outcome = {}
+
+                def secondary():
+                    outcome["ok"] = Win32Handoff.submit(
+                        ["second.pdf"], directory=tmpdir, wait=2.0, mutex_name=name
+                    )
+
+                thread = threading.Thread(target=secondary)
+                thread.start()
+                thread.join(0.3)
+                self.assertTrue(thread.is_alive())
+                primary.start()
+                thread.join(3)
+                primary.wait_idle(2)
+                self.assertFalse(thread.is_alive())
+                self.assertTrue(outcome["ok"])
+                self.assertEqual(received, [["second.pdf"]])
+            finally:
+                primary.stop()
 
 
 class SplitEnablementTests(unittest.TestCase):

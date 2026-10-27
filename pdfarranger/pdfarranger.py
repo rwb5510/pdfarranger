@@ -197,7 +197,7 @@ _ = gettext.gettext
 from .session import plan_launch, SaveGate, window_prompt_sequence
 from .document import Document
 from .window import ArrangerWindow
-from .win32ipc import Win32Handoff, gtk_unique_is_enough
+from .win32ipc import HANDOFF_WAIT, Win32Handoff, gtk_unique_is_enough
 
 try:
     from . import undo
@@ -574,14 +574,20 @@ class PdfArranger(ApplicationBase):
                 if path:
                     files.append(path)
 
-        if not gtk_unique_is_enough():
+        if not gtk_unique_is_enough() and self.handoff is None:
             if Win32Handoff.submit(files):
                 return 0
-            if self.handoff is None:
-                self.handoff = Win32Handoff(lambda fs: self.open_launched_files(True, fs))
-                self.handoff.start()
+            candidate = Win32Handoff(lambda fs: self.open_launched_files(True, fs))
+            if candidate.claim():
+                candidate.start()
+                self.handoff = candidate
+            elif Win32Handoff.submit(files, wait=HANDOFF_WAIT):
+                return 0
+            elif candidate.claim():
+                candidate.start()
+                self.handoff = candidate
 
-        if not self.get_windows():
+        if not (self.windows or (hasattr(self, 'get_windows') and self.get_windows())):
             self.activate()
 
         self.open_launched_files(command_line.get_is_remote(), files)

@@ -288,6 +288,11 @@ class Document:
         """Dialog parent. PageAdder and PDFDoc already read app.window."""
         return self.gtk_window
 
+    def retitle(self):
+        """Forward title update to host window if present."""
+        if hasattr(self, 'host') and self.host:
+            self.host.retitle()
+
     def build_view(self, sw_parent_unused=None):
         if Gtk is None:
             return
@@ -859,12 +864,11 @@ class Document:
             #  + min_col_spacing * (col_num+1) = iw_width
             col_num = (iw_width - 2 * min_margin - min_col_spacing) //\
                       (padded_cell_width + min_col_spacing)
-            if self.zoom_fit and self.fit_one_page:
+            if (self.zoom_fit and self.fit_one_page) or col_num < 1:
                 col_num = 1
             spacing = (iw_width - col_num * padded_cell_width - 2 * min_margin) // (col_num + 1)
             margin = (iw_width - col_num * (padded_cell_width + spacing) + spacing) // 2
-            if col_num == 0:
-                col_num = 1
+            if margin < 6:
                 margin = 6
             self.iconview.set_columns(col_num)
             self.iconview.set_column_spacing(spacing)

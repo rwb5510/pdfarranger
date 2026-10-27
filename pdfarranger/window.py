@@ -211,6 +211,11 @@ class ArrangerWindow:
     def __resource_path(self, path):
         if hasattr(self.app, '_PdfArranger__resource_path'):
             return self.app._PdfArranger__resource_path(path)
+        candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', path)
+        if os.path.exists(candidate):
+            return candidate
+        if os.path.exists(os.path.join('data', path)):
+            return os.path.join('data', path)
         return path
 
     def __create_main_window(self):
@@ -554,6 +559,9 @@ class ArrangerWindow:
             _detach(right_doc.sw)
             paned.pack1(left_doc.sw, resize=True, shrink=False)
             paned.pack2(right_doc.sw, resize=True, shrink=False)
+            area_w = self.page_area.get_allocation().width
+            if area_w > 50:
+                paned.set_position(area_w // 2)
             self.page_area.pack_start(paned, True, True, 0)
             paned.show_all()
         else:
