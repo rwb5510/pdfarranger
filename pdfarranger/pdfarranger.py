@@ -195,7 +195,10 @@ gettext.textdomain(DOMAIN)
 _ = gettext.gettext
 
 from .session import plan_launch, SaveGate, window_prompt_sequence
-from .document import Document
+from .document import (
+    Document, EncryptionPasswordDialog, is_same_page_size,
+    sorted_selection_indices, is_selection_contiguous, save_documents_then,
+)
 from .window import ArrangerWindow
 from .win32ipc import HANDOFF_WAIT, Win32Handoff, gtk_unique_is_enough
 
@@ -656,16 +659,9 @@ class PdfArranger(ApplicationBase):
                     else:  # Cancel / CANCEL
                         return
 
-        for win, doc in save_plan:
-            if doc.save_file:
-                doc.save('ALL_TO_SINGLE', [doc.save_file])
-            else:
-                doc.choose_export_pdf_name('ALL_TO_SINGLE')
-            if doc.export_process:
-                doc.export_process.join()
-            if doc.is_unsaved:
-                return
+        save_documents_then([doc for win, doc in save_plan], self._quit_without_prompts)
 
+    def _quit_without_prompts(self):
         for win in list(self.windows):
             for doc in list(win.docs.values()):
                 if hasattr(doc, 'destroy'):
@@ -725,58 +721,6 @@ class PdfArranger(ApplicationBase):
 
 
 
-
-class EncryptionPasswordDialog(Gtk.Dialog if Gtk else object):
-    def __init__(self, parent, password=None):
-        super().__init__(
-            title=_("Set Password"),
-            parent=parent,
-            flags=Gtk.DialogFlags.MODAL,
-            buttons=(
-                _("_Cancel"),
-                Gtk.ResponseType.CANCEL,
-                _("_OK"),
-                Gtk.ResponseType.OK,
-            ),
-        )
-        self.password = password
-        self.set_default_response(Gtk.ResponseType.OK)
-        self.entry = Gtk.Entry()
-        self.entry.set_visibility(False)
-        self.entry.set_activates_default(True)
-        self.entry.set_width_chars(30)
-        self.vbox.pack_start(self.entry, False, False, 0)
-        action_area = self.get_action_area()
-        action_area.set_layout(Gtk.ButtonBoxStyle.EXPAND)
-        action_area.set_homogeneous(True)
-        self.set_resizable(False)
-
-    def get_password(self):
-        self.show_all()
-        result = self.run()
-        text = self.entry.props.text
-        self.destroy()
-        if result == Gtk.ResponseType.OK:
-            return text
-        else:
-            return self.password
-
-def is_same_page_size(pages):
-    p1w, p1h = pages[0].size_in_points()
-    for page in pages[1:]:
-        pw, ph = page.size_in_points()
-        if abs(p1w-pw) > 1e-2 or abs(p1h-ph) > 1e-2:
-            return False
-    return True
-
-# Sort selection in-place and return page numbers
-def sorted_selection_indices(selected_items):
-    selected_items.sort(key=lambda x: x.get_indices()[0])
-    return [ x.get_indices()[0] for x in selected_items ]
-
-# Checks whether selected pages are contiguous
-def is_selection_contiguous(selected_page_numbers):
-    return len(selected_page_numbers) == selected_page_numbers[-1] - selected_page_numbers[0] + 1
 
 def main():
     PdfArranger().run(sys.argv)

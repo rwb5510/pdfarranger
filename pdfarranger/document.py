@@ -155,6 +155,41 @@ else:
     TARGETS_SW = []
 
 
+def save_documents_then(documents, on_complete):
+    """Save an approved close plan serially without blocking GTK's event loop.
+
+    A failed save or a cancelled Save As leaves every document open. Return
+    whether the entire plan completed synchronously; asynchronous completion
+    invokes on_complete from the last successful export callback.
+    """
+    pending = iter(documents)
+    completed = False
+
+    def advance(success=True):
+        nonlocal completed
+        if not success:
+            return
+        doc = next(pending, None)
+        if doc is None:
+            on_complete()
+            completed = True
+            return
+        doc._save_callback = advance
+        try:
+            doc.save_or_choose()
+        except Exception:
+            doc._save_callback = None
+            raise
+        if not doc.is_busy() and doc._save_callback is advance:
+            # Save As was cancelled, the gate was unavailable, or save() was
+            # synchronous. No export callback will arrive for this attempt.
+            doc._save_callback = None
+            advance(not doc.is_unsaved)
+
+    advance()
+    return completed
+
+
 class Document:
     TARGETS_IV = TARGETS_IV
     TARGETS_SW = TARGETS_SW
@@ -189,6 +224,7 @@ class Document:
         self.rendering_thread = None
         self.export_process = None
         self.post_action = None
+        self._save_callback = None
         self.render_id = None
         self.nfile = 0
         self.layer_pos = (0.5, 0.5)
@@ -259,6 +295,11 @@ class Document:
                 self.iconview.get_model().clear()
         self.pdfqueue.clear()
         malloc_trim()
+
+    @property
+    def config(self):
+        """Application preferences used by shared document operations."""
+        return self.app.config
 
     @property
     def tmp_dir(self):
@@ -1085,34 +1126,39 @@ class Document:
                 self.error_message_dialog(msg)
             elif msg_type == Gtk.MessageType.WARNING and self.app.config.show_save_warnings():
                 self.save_warning_dialog(msg)
-            if not self.is_unsaved:
-                if isinstance(self.post_action, tuple) and self.post_action[0] == "close":
-                    doc_id = self.post_action[1]
-                    self.post_action = None
-                    if self.host and hasattr(self.host, "close_document"):
-                        self.host.close_document(doc_id)
-                elif self.post_action == 'close-window' or (isinstance(self.post_action, tuple) and self.post_action[0] == 'close-window'):
-                    self.post_action = None
-                    if self.host and hasattr(self.host, "close_window"):
-                        self.host.close_window()
-                elif self.post_action == 'quit-all' or (isinstance(self.post_action, tuple) and self.post_action[0] == 'quit-all'):
-                    self.post_action = None
-                    if self.app and hasattr(self.app, "quit_all"):
-                        self.app.quit_all()
-                elif self.post_action == 'CLEAR_DATA':
-                    self.post_action = None
-                    self.clear_data()
-                elif self.post_action == 'CLOSE_APPLICATION':
-                    self.post_action = None
-                    if self.host and hasattr(self.host, "close_application"):
-                        self.host.close_application()
-            else:
-                self.post_action = None
-            if self.host and getattr(self.host, 'post_action', None) == 'close-window':
-                self.host.post_action = None
-                self.host.close_window()
         finally:
             self.finish_export()
+        callback = self._save_callback
+        self._save_callback = None
+        if callback is not None:
+            callback(not self.is_unsaved)
+            return False
+        if not self.is_unsaved:
+            if isinstance(self.post_action, tuple) and self.post_action[0] == "close":
+                doc_id = self.post_action[1]
+                self.post_action = None
+                if self.host and hasattr(self.host, "close_document"):
+                    self.host.close_document(doc_id)
+            elif self.post_action == 'close-window' or (isinstance(self.post_action, tuple) and self.post_action[0] == 'close-window'):
+                self.post_action = None
+                if self.host and hasattr(self.host, "close_window"):
+                    self.host.close_window()
+            elif self.post_action == 'quit-all' or (isinstance(self.post_action, tuple) and self.post_action[0] == 'quit-all'):
+                self.post_action = None
+                if self.app and hasattr(self.app, "quit_all"):
+                    self.app.quit_all()
+            elif self.post_action == 'CLEAR_DATA':
+                self.post_action = None
+                self.clear_data()
+            elif self.post_action == 'CLOSE_APPLICATION':
+                self.post_action = None
+                if self.host and hasattr(self.host, "close_application"):
+                    self.host.close_application()
+        else:
+            self.post_action = None
+        if self.host and getattr(self.host, 'post_action', None) == 'close-window':
+            self.host.post_action = None
+            self.host.close_window()
         return False  # cancel timer
 
     def set_export_state(self, enable, message=_("Saving…")):
@@ -3006,3 +3052,56 @@ class Document:
             if pdf.password:
                 self.set_password(pdf.password)
                 break
+
+
+class EncryptionPasswordDialog(Gtk.Dialog if Gtk else object):
+    def __init__(self, parent, password=None):
+        super().__init__(
+            title=_("Set Password"),
+            parent=parent,
+            flags=Gtk.DialogFlags.MODAL,
+            buttons=(
+                _("_Cancel"),
+                Gtk.ResponseType.CANCEL,
+                _("_OK"),
+                Gtk.ResponseType.OK,
+            ),
+        )
+        self.password = password
+        self.set_default_response(Gtk.ResponseType.OK)
+        self.entry = Gtk.Entry()
+        self.entry.set_visibility(False)
+        self.entry.set_activates_default(True)
+        self.entry.set_width_chars(30)
+        self.vbox.pack_start(self.entry, False, False, 0)
+        action_area = self.get_action_area()
+        action_area.set_layout(Gtk.ButtonBoxStyle.EXPAND)
+        action_area.set_homogeneous(True)
+        self.set_resizable(False)
+
+    def get_password(self):
+        self.show_all()
+        result = self.run()
+        text = self.entry.props.text
+        self.destroy()
+        if result == Gtk.ResponseType.OK:
+            return text
+        else:
+            return self.password
+
+def is_same_page_size(pages):
+    p1w, p1h = pages[0].size_in_points()
+    for page in pages[1:]:
+        pw, ph = page.size_in_points()
+        if abs(p1w-pw) > 1e-2 or abs(p1h-ph) > 1e-2:
+            return False
+    return True
+
+# Sort selection in-place and return page numbers
+def sorted_selection_indices(selected_items):
+    selected_items.sort(key=lambda x: x.get_indices()[0])
+    return [ x.get_indices()[0] for x in selected_items ]
+
+# Checks whether selected pages are contiguous
+def is_selection_contiguous(selected_page_numbers):
+    return len(selected_page_numbers) == selected_page_numbers[-1] - selected_page_numbers[0] + 1

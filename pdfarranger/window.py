@@ -53,7 +53,7 @@ from .session import (
     tab_label,
     tab_tooltip,
 )
-from .document import Document, get_file_path_from_uri
+from .document import Document, get_file_path_from_uri, save_documents_then
 
 _ = gettext.gettext
 DOMAIN = 'pdfarranger'
@@ -775,17 +775,14 @@ class ArrangerWindow:
             if outcome.aborted:
                 return False
 
-            for d_id in outcome.save_ids:
-                doc = self.docs[d_id]
-                if doc.save_file:
-                    doc.save('ALL_TO_SINGLE', [doc.save_file])
-                else:
-                    doc.choose_export_pdf_name('ALL_TO_SINGLE')
-                if doc.export_process:
-                    doc.export_process.join()
-                if doc.is_unsaved:
-                    return False
+            return save_documents_then(
+                [self.docs[d_id] for d_id in outcome.save_ids],
+                self._close_without_prompts,
+            )
 
+        return self._close_without_prompts()
+
+    def _close_without_prompts(self):
         for doc in list(self.docs.values()):
             if hasattr(doc, 'destroy'):
                 doc.destroy()
@@ -927,8 +924,8 @@ class ArrangerWindow:
             ('focus-other-pane', self.on_action_focus_other_pane),
             ('close', self.on_action_close),
             ('quit', lambda a, p, u: self.app.quit_all()),
-            ('undo', lambda a, p, u: self.focused_document().undomanager.undo()),
-            ('redo', lambda a, p, u: self.focused_document().undomanager.redo()),
+            ('undo', lambda a, p, u: self.focused_document().undomanager.undo(a, p, u)),
+            ('redo', lambda a, p, u: self.focused_document().undomanager.redo(a, p, u)),
             ('split', lambda a, p, u: self._forward('split_pages', a, p, u)),
             ('merge', lambda a, p, u: self._forward('merge_pages', a, p, u)),
             ('metadata', lambda a, p, u: self._forward('edit_metadata', a, p, u)),
@@ -954,7 +951,7 @@ class ArrangerWindow:
         self.window.add_action_entries(self.actions)
 
         password_toggle = Gio.SimpleAction.new_stateful("password-setup", None, GLib.Variant.new_boolean(False))
-        password_toggle.connect("change-state", lambda act, val: self._forward('password_setup', act, val, None))
+        password_toggle.connect("change-state", lambda act, val: self._forward('password_setup', act, val))
         self.window.add_action(password_toggle)
 
         self.main_menu = self.uiXML.get_object("main_menu_button")

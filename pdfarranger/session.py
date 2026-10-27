@@ -196,16 +196,16 @@ class WindowModel:
             self.focused = Pane.LEFT
 
     def _repair_panes_after_removal(self, removed: int) -> None:
-        if self.left_id == removed:
+        if len(self.order) == 1:
             self.left_id = self.order[0]
+            self.right_id = None
+            self.split = False
+            self.focused = Pane.LEFT
+            return
+        if self.left_id == removed:
+            self.left_id = next(doc_id for doc_id in self.order if doc_id != self.right_id)
         if self.right_id == removed:
-            replacement = next((doc_id for doc_id in self.order if doc_id != self.left_id), None)
-            if replacement is None:
-                self.split = False
-                self.right_id = None
-                self.focused = Pane.LEFT
-            else:
-                self.right_id = replacement
+            self.right_id = next(doc_id for doc_id in self.order if doc_id != self.left_id)
         if self.focused is Pane.RIGHT and not self.split:
             self.focused = Pane.LEFT
 
