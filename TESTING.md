@@ -1,9 +1,12 @@
 # Testing
 
-The code is tested using [unittest](https://docs.python.org/3/library/unittest.html) and [dogtail](https://gitlab.com/dogtail/dogtail). Currently there are 3 files:
-1. `test.py` which test the GUI
-2. `test_core.py` which test Page and LayerPage class
-3. `test_exporter.py` which test that exported pdf is as expected
+The code is tested using [unittest](https://docs.python.org/3/library/unittest.html) and [dogtail](https://gitlab.com/dogtail/dogtail). Currently there are 4 test suites:
+1. `test.py` which tests the GUI:
+   - `TestBatch09` opens a second file as another tab in the same process.
+   - `TestBatch17` covers startup merge, import into the focused tab, and side by side.
+2. `test_core.py` which tests Page and LayerPage class
+3. `test_exporter.py` which tests that exported pdf is as expected
+4. `test_session.py` which tests the multi-window tabbed session model, window state, IPC logic, and split-view coordination (90 tests)
 
 When a PR is made a test is automatically run. If the test fail it (should be) because the PR introduce a new bug, or because the behavior of the app is changed and the tests are not updated to reflect the change.
 
@@ -24,6 +27,8 @@ python3 -X tracemalloc -u -m unittest -v -f tests.test.TestBatch5
 python3 -X tracemalloc -u -m unittest -v -f tests.test_core
 # Run test_exporter
 python3 -X tracemalloc -u -m unittest -v -f tests.test_exporter
+# Run test_session (headless unit tests for tabs and window model)
+python3 -X tracemalloc -u -m unittest -v -f tests.test_session
 ```
 
 ## Run tests in Docker (GUI not visible)

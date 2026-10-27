@@ -3,3 +3,5 @@ venv/
 tests/exporter/out.pdf
 build/
 pdfarranger.egg-info/
+.superpowers/
+docs/artifacts/tasks/connect-github-repo.md

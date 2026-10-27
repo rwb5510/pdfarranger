@@ -314,6 +314,14 @@ class PdfArrangerTest(unittest.TestCase):
         viewport = self._app().child(roleName="layered pane")
         return self._find_by_role("icon", viewport)
 
+    def _tab_labels(self):
+        return [
+            node
+            for node in self._find_by_role("label")
+            if (hasattr(node, "name") and node.name == "pdfarranger-tab-label")
+            or (callable(getattr(node, "get_name", None)) and node.get_name() == "pdfarranger-tab-label")
+        ]
+
     def _popupmenu(self, page, action):
         """Run an action on a give page using the popup menu"""
         if page is None:
@@ -959,19 +967,21 @@ class TestBatch09(PdfArrangerTest):
         self._wait_cond(lambda: filechooser.dead)
 
     def test_03_open_again(self):
-        """Create a new pdfarranger instance"""
+        """Open another file as a second tab in the same process."""
         self.assertEqual(len(self._apps()), 1)
         filechooser = self._import_file("tests/test.pdf", open_action=True)
         self._wait_cond(lambda: filechooser.dead)
-        self._wait_cond(lambda: len(self._apps()) == 2)
+        self.assertEqual(len(self._apps()), 1)
+        self._wait_cond(lambda: len(self._tab_labels()) >= 2)
 
     def test_04_quit(self):
-        """Quit the second instance"""
-        self._quit()
-        self._wait_cond(lambda: len(self._apps()) == 1)
+        """Close the second tab"""
+        self._app().keyCombo("<ctrl>w")
+        self._wait_cond(lambda: len(self._tab_labels()) == 1)
+        self.assertEqual(len(self._apps()), 1)
 
     def test_05_quit(self):
-        """Quit the first instance"""
+        """Quit the remaining window"""
         self._quit()
         self._process().wait(timeout=22)
 
@@ -1270,4 +1280,41 @@ class TestBatch16(PdfArrangerTest):
     def test_07_quit(self):
         from dogtail import rawinput
         rawinput.keyCombo("esc")
+        self._quit_without_saving()
+
+
+class TestBatch17(PdfArrangerTest):
+    """Tabs, side by side, and closing one document."""
+
+    def test_01_startup_merges_two_files_into_one_tab(self):
+        self._start(["tests/test.pdf"])
+        one = len(self._icons())
+        self.assertGreater(one, 0)
+        self._quit()
+        self._start(["tests/test.pdf", "tests/test.pdf"])
+        self._wait_cond(lambda: len(self._icons()) == one * 2)
+        self.assertEqual(len(self._apps()), 1)
+        self.assertEqual(len(self._tab_labels()), 1)
+
+    def test_02_new_tab_and_import_do_not_change_the_first_tab(self):
+        self._start(["tests/test.pdf"])
+        one = len(self._icons())
+        self._mainmenu("New Tab")
+        self._wait_cond(lambda: len(self._tab_labels()) == 2)
+        self._import_file("tests/test.pdf", open_action=False)
+        self._wait_cond(lambda: len(self._icons()) == one)
+        self._tab_labels()[0].click()
+        self._wait_cond(lambda: len(self._icons()) == one)
+
+    def test_03_close_clean_second_tab(self):
+        self._app().keyCombo("<ctrl>w")
+        self._wait_cond(lambda: len(self._tab_labels()) == 1)
+
+    def test_04_side_by_side(self):
+        self._mainmenu("New Tab")
+        self._import_file("tests/test.pdf", open_action=False)
+        self._mainmenu(["View", "Side by Side"])
+        self._wait_cond(lambda: len(self._find_by_role("icon view")) == 2)
+
+    def test_05_quit(self):
         self._quit_without_saving()

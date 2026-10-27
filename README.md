@@ -10,14 +10,50 @@ or split PDF documents and rotate, crop and rearrange their pages using an
 interactive and intuitive graphical interface. It is a front end for
 [pikepdf](https://github.com/pikepdf/pikepdf).
 
+### What's New in the Latest Version: Tabbed Documents & Side-by-Side View
+- **Tabbed Interface:** Work on multiple documents simultaneously in a single application window with a convenient tab strip (`Ctrl+T`, `Ctrl+W`, `Ctrl+Tab`).
+- **Two-Pane Side-by-Side View:** Compare documents and arrange pages side-by-side (`View` → `Side by Side`), with an active blue border indicator and `F6` pane focus switching.
+- **Cross-Document Drag and Drop:** Drag pages between open tabs or between side-by-side panes (Move by default, `Ctrl`+Drag to Copy).
+- **Detachable Windows:** Drag tabs out to create new windows or move tabs across windows within a single unified process.
+- **Isolated Document State:** Independent undo/redo history, zoom levels, and find/search queries (`Ctrl+F`) per document.
+
 *PDF Arranger* is a fork of Konstantinos Poulios’s PDF-Shuffler
 (see [Savannah](https://savannah.nongnu.org/projects/pdfshuffler) or
 [Sourceforge](http://sourceforge.net/projects/pdfshuffler)).
 It’s a humble attempt to make the project a bit more active.
 
-For more info see [User Manual](https://github.com/pdfarranger/pdfarranger/wiki/User-Manual).
+For more info see [User Manual](https://github.com/pdfarranger/pdfarranger/wiki/User-Manual) and [ROADMAP.md](ROADMAP.md).
 
-![screenshot of PDF Arranger](https://github.com/pdfarranger/pdfarranger/raw/main/data/screenshot.png)
+### Screenshots
+
+#### Two-Pane Side-by-Side View
+*Side-by-side comparison and cross-document editing with active pane outline (`#1c71d8`):*
+![Two-Pane Side-by-Side View in PDF Arranger](data/screenshot-side-by-side.png)
+
+#### Tabbed Document Interface
+*Multiple PDF documents organized in tabs with unsaved indicators and independent search:*
+![Tabbed Documents in PDF Arranger](data/screenshot-tabs.png)
+
+#### Single Document View
+![screenshot of PDF Arranger](data/screenshot.png)
+
+### Key Shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+T` | Open a new empty tab |
+| `Ctrl+W` | Close the active tab / document |
+| `Ctrl+Tab` | Cycle to next tab |
+| `Ctrl+Shift+Tab` | Cycle to previous tab |
+| `F6` | Toggle active pane focus in Side-by-Side view |
+| `Ctrl+N` | Open a new window |
+| `Ctrl+O` | Open PDF files (fills empty document or opens into a new tab) |
+| `Ctrl+I` | Import PDF / images into the focused document |
+| `Ctrl+F` | Find / search text in the active document |
+| `Ctrl+S` | Save current document |
+| `Ctrl+Shift+S` | Save document as... |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo edits in current document |
+| `Ctrl+Q` | Quit application (with orderly save prompts) |
 
 ## Downloads
 
@@ -98,6 +134,64 @@ For testing see [TESTING.md](TESTING.md).
 For Windows see [Win32.md](Win32.md).
 
 For macOS see [macOS.md](macOS.md).
+
+### Repository Structure
+
+```
+.
+|-- COPYING
+|-- README.md
+|-- ROADMAP.md
+|-- TESTING.md
+|-- Win32.md
+|-- macOS.md
+|-- data/
+|   |-- com.github.jeromerobert.pdfarranger.desktop
+|   |-- com.github.jeromerobert.pdfarranger.metainfo.xml
+|   |-- menu.ui
+|   |-- pdfarranger.ico
+|   |-- pdfarranger.ui
+|   |-- screenshot-side-by-side.png
+|   |-- screenshot-tabs.png
+|   \-- screenshot.png
+|-- doc/
+|   \-- pdfarranger.1
+|-- docs/
+|   |-- artifacts/
+|   |   |-- tasks/
+|   |   \-- walkthroughs/
+|   \-- superpowers/
+|       |-- plans/
+|       \-- specs/
+|-- pdfarranger/
+|   |-- __init__.py
+|   |-- __main__.py
+|   |-- config.py
+|   |-- core.py
+|   |-- document.py
+|   |-- exporter.py
+|   |-- exporter_outlines.py
+|   |-- iconview.py
+|   |-- image_exporter.py
+|   |-- metadata.py
+|   |-- pageutils.py
+|   |-- pdfarranger.py
+|   |-- search.py
+|   |-- session.py
+|   |-- splitter.py
+|   |-- undo.py
+|   |-- win32ipc.py
+|   \-- window.py
+|-- setup.py
+|-- setup_win32.py
+|-- snapcraft.yaml
+\-- tests/
+    |-- exporter/
+    |-- test.py
+    |-- test_core.py
+    |-- test_exporter.py
+    \-- test_session.py
+```
 
 
 ## For translators
