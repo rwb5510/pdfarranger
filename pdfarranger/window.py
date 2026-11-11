@@ -43,6 +43,7 @@ except (ImportError, ValueError):
     SearchBarWidget = None
 
 from .session import (
+    ACTIVE_TAB_CLASS,
     OpenTarget,
     PromptChoice,
     WindowModel,
@@ -50,6 +51,7 @@ from .session import (
     prompt_order,
     resolve_prompts,
     single_close,
+    tab_css_classes,
     tab_label,
     tab_tooltip,
 )
@@ -263,6 +265,7 @@ class ArrangerWindow:
         tab_box.set_name(f"tab-{doc.id}")
 
         event_box = Gtk.EventBox()
+        event_box.set_visible_window(False)
         label = Gtk.Label()
         label.set_name("pdfarranger-tab-label")
         event_box.add(label)
@@ -581,6 +584,20 @@ class ArrangerWindow:
                     if style_ctx.has_class("focused-pane"):
                         style_ctx.remove_class("focused-pane")
 
+    def sync_tab_active_classes(self) -> None:
+        focused_id = self.model.focused_id()
+        for doc_id, widgets in self.tab_widgets.items():
+            _label, tab_box = widgets
+            if tab_box is None or not hasattr(tab_box, "get_style_context"):
+                continue
+            style = tab_box.get_style_context()
+            wanted = ACTIVE_TAB_CLASS in tab_css_classes(doc_id, focused_id)
+            has = style.has_class(ACTIVE_TAB_CLASS)
+            if wanted and not has:
+                style.add_class(ACTIVE_TAB_CLASS)
+            elif has and not wanted:
+                style.remove_class(ACTIVE_TAB_CLASS)
+
     def show_model(self):
         focused = self.focused_document()
         if hasattr(self, 'searchbar_widget') and self.searchbar_widget:
@@ -600,6 +617,8 @@ class ArrangerWindow:
                 if hasattr(self.searchbar_widget, 'bind_document'):
                     self.searchbar_widget.bind_document(None)
                 self._bound_doc_id = None
+
+        self.sync_tab_active_classes()
 
         if Gtk is None:
             return

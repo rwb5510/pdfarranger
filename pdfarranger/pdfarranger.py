@@ -194,7 +194,7 @@ gettext.bindtextdomain(DOMAIN, localedir)
 gettext.textdomain(DOMAIN)
 _ = gettext.gettext
 
-from .session import plan_launch, SaveGate, window_prompt_sequence
+from .session import ACTIVE_TAB_CSS, plan_launch, SaveGate, window_prompt_sequence
 from .document import (
     Document, EncryptionPasswordDialog, is_same_page_size,
     sorted_selection_indices, is_selection_contiguous, save_documents_then,
@@ -294,6 +294,27 @@ def is_ctrl_pressed():
 
 
 ApplicationBase = Gtk.Application if Gtk else object
+
+
+def application_css() -> str:
+    return """
+            iconview {
+                outline-color: alpha(currentColor, 0.8);
+                outline-style: dashed;
+                outline-offset: -2px;
+                outline-width: 2px;
+                -gtk-outline-radius: 2px;
+            }
+            scrolledwindow overshoot {
+                background: none;
+            }
+            scrolledwindow.focused-pane {
+                border-width: 2px;
+                border-style: solid;
+                border-color: #1c71d8;
+            }
+            """ + ACTIVE_TAB_CSS
+
 
 class PdfArranger(ApplicationBase):
     # Drag and drop ID for pages coming from the same pdfarranger instance
@@ -497,24 +518,7 @@ class PdfArranger(ApplicationBase):
         if Gtk:
             # Set cursor look and hide overshoot gradient
             style_provider = Gtk.CssProvider()
-            css_data = """
-            iconview {
-                outline-color: alpha(currentColor, 0.8);
-                outline-style: dashed;
-                outline-offset: -2px;
-                outline-width: 2px;
-                -gtk-outline-radius: 2px;
-            }
-            scrolledwindow overshoot {
-                background: none;
-            }
-            scrolledwindow.focused-pane {
-                border-width: 2px;
-                border-style: solid;
-                border-color: #1c71d8;
-            }
-            """
-            style_provider.load_from_data(bytes(css_data.encode()))
+            style_provider.load_from_data(bytes(application_css().encode()))
             Gtk.StyleContext.add_provider_for_screen(
                 Gdk.Screen.get_default(),
                 style_provider,

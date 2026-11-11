@@ -125,6 +125,96 @@ class ActiveTabTests(unittest.TestCase):
         self.assertNotIn("font-weight", ACTIVE_TAB_CSS)
         self.assertNotIn(":hover", ACTIVE_TAB_CSS)
 
+    def test_application_css_keeps_the_pane_outline_and_adds_the_tab_rules(self):
+        from pdfarranger.pdfarranger import application_css
+
+        css = application_css()
+        self.assertIn("scrolledwindow.focused-pane", css)
+        self.assertIn("border-color: #1c71d8", css)
+        self.assertIn(ACTIVE_TAB_CSS, css)
+
+    def test_sync_tab_active_classes_marks_only_the_focused_tab(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class FakeStyle:
+            def __init__(self):
+                self.classes = set()
+
+            def has_class(self, name):
+                return name in self.classes
+
+            def add_class(self, name):
+                self.classes.add(name)
+
+            def remove_class(self, name):
+                self.classes.discard(name)
+
+        class FakeBox:
+            def __init__(self, classes):
+                self.style = FakeStyle()
+                self.style.classes.update(classes)
+
+            def get_style_context(self):
+                return self.style
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        win = ArrangerWindow(DummyApp())
+        first = win.model.focused_id()
+        second = win.model.new_tab()
+        first_box = FakeBox(set())
+        second_box = FakeBox({ACTIVE_TAB_CLASS})
+        win.tab_widgets[first] = (None, first_box)
+        win.tab_widgets[second] = (None, second_box)
+
+        win.sync_tab_active_classes()
+        self.assertEqual(first_box.style.classes, set())
+        self.assertEqual(second_box.style.classes, {ACTIVE_TAB_CLASS})
+
+        win.sync_tab_active_classes()
+        self.assertEqual(second_box.style.classes, {ACTIVE_TAB_CLASS})
+
+        win.model.click_tab(first)
+        win.sync_tab_active_classes()
+        self.assertEqual(first_box.style.classes, {ACTIVE_TAB_CLASS})
+        self.assertEqual(second_box.style.classes, set())
+
+    def test_show_model_syncs_the_active_tab(self):
+        from pdfarranger.window import ArrangerWindow
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        win = ArrangerWindow(DummyApp())
+        calls = []
+        original = win.sync_tab_active_classes
+
+        def wrapped():
+            calls.append(win.model.focused_id())
+            original()
+
+        win.sync_tab_active_classes = wrapped
+        win.show_model()
+        self.assertEqual(calls, [win.model.focused_id()])
+
+    def test_tab_event_box_is_input_only(self):
+        from pdfarranger.window import Gtk, ArrangerWindow
+
+        if Gtk is None:
+            self.skipTest("GTK is not importable")
+
+        class DummyApp:
+            def __init__(self):
+                self.windows = []
+
+        win = ArrangerWindow(DummyApp())
+        _label, tab_box = win.tab_widgets[win.model.focused_id()]
+        event_box = tab_box.get_children()[0]
+        self.assertFalse(event_box.get_visible_window())
+
 
 class LaunchPlanTests(unittest.TestCase):
     def test_startup_with_files_fills_the_first_document(self):
