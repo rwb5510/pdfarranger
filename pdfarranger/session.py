@@ -51,6 +51,40 @@ def tab_tooltip(save_path: str | None, first_source_path: str | None) -> str:
     return ""
 
 
+ACTIVE_TAB_CLASS = "active-tab"
+
+
+def tab_css_classes(doc_id: int, focused_id: int | None) -> frozenset[str]:
+    if focused_id is not None and doc_id == focused_id:
+        return frozenset((ACTIVE_TAB_CLASS,))
+    return frozenset()
+
+
+ACTIVE_TAB_CSS = """
+box#tab-strip-box > box {
+    background-color: transparent;
+    border-radius: 4px 4px 0 0;
+    border-width: 0 0 3px 0;
+    border-style: solid;
+    border-color: transparent;
+    padding: 2px 6px;
+}
+box#tab-strip-box > box.active-tab {
+    background-color: @theme_selected_bg_color;
+    border-color: @theme_selected_bg_color;
+}
+box#tab-strip-box > box.active-tab label {
+    color: @theme_selected_fg_color;
+}
+box#tab-strip-box > box button {
+    background-color: transparent;
+    background-image: none;
+    border-style: none;
+    box-shadow: none;
+}
+"""
+
+
 @dataclass(frozen=True)
 class LaunchPlan:
     action: str

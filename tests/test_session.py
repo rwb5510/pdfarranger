@@ -2,11 +2,14 @@ import os
 import unittest
 
 from pdfarranger.session import (
+    ACTIVE_TAB_CLASS,
+    ACTIVE_TAB_CSS,
     LaunchPlan,
     OpenTarget,
     choose_open_target,
     document_occupied,
     plan_launch,
+    tab_css_classes,
     tab_label,
     tab_tooltip,
     Pane,
@@ -52,6 +55,75 @@ class TabTextTests(unittest.TestCase):
         self.assertEqual(tab_tooltip(r"C:\a\contract.pdf", r"C:\b\scan.pdf"), r"C:\a\contract.pdf")
         self.assertEqual(tab_tooltip(None, r"C:\b\scan.pdf"), r"C:\b\scan.pdf")
         self.assertEqual(tab_tooltip(None, None), "")
+
+
+class ActiveTabTests(unittest.TestCase):
+    def test_the_focused_document_is_the_only_active_tab(self):
+        self.assertEqual(tab_css_classes(1, 1), frozenset({ACTIVE_TAB_CLASS}))
+        self.assertEqual(tab_css_classes(2, 1), frozenset())
+
+    def test_no_tab_is_active_when_nothing_is_focused(self):
+        self.assertEqual(tab_css_classes(1, None), frozenset())
+
+    def test_a_single_tab_is_active(self):
+        model = WindowModel()
+        only = model.focused_id()
+        self.assertEqual(
+            tab_css_classes(only, model.focused_id()),
+            frozenset({ACTIVE_TAB_CLASS}),
+        )
+
+    def test_click_cycle_and_split_move_the_active_class(self):
+        model = WindowModel()
+        first = model.focused_id()
+        second = model.new_tab()
+        self.assertEqual(model.focused_id(), second)
+        self.assertEqual(tab_css_classes(second, model.focused_id()), frozenset({ACTIVE_TAB_CLASS}))
+        self.assertEqual(tab_css_classes(first, model.focused_id()), frozenset())
+
+        model.click_tab(first)
+        self.assertEqual(tab_css_classes(first, model.focused_id()), frozenset({ACTIVE_TAB_CLASS}))
+        self.assertEqual(tab_css_classes(second, model.focused_id()), frozenset())
+
+        model.cycle_tab(False)
+        self.assertEqual(model.focused_id(), second)
+        self.assertEqual(tab_css_classes(second, model.focused_id()), frozenset({ACTIVE_TAB_CLASS}))
+        self.assertEqual(tab_css_classes(first, model.focused_id()), frozenset())
+
+        model.click_tab(first)
+        model.toggle_split()
+        self.assertTrue(model.split)
+        self.assertEqual(model.focused_id(), first)
+        self.assertEqual(tab_css_classes(first, model.focused_id()), frozenset({ACTIVE_TAB_CLASS}))
+        self.assertEqual(tab_css_classes(second, model.focused_id()), frozenset())
+
+        model.focus_other_pane()
+        self.assertEqual(model.focused_id(), second)
+        self.assertEqual(tab_css_classes(second, model.focused_id()), frozenset({ACTIVE_TAB_CLASS}))
+        self.assertEqual(tab_css_classes(first, model.focused_id()), frozenset())
+
+    def test_closing_the_focused_tab_activates_the_remaining_tab(self):
+        model = WindowModel()
+        first = model.focused_id()
+        second = model.new_tab()
+        self.assertEqual(model.focused_id(), second)
+        self.assertEqual(model.close_document(second), "removed")
+        self.assertEqual(model.focused_id(), first)
+        self.assertEqual(tab_css_classes(first, model.focused_id()), frozenset({ACTIVE_TAB_CLASS}))
+        self.assertEqual(tab_css_classes(second, model.focused_id()), frozenset())
+
+    def test_active_tab_css_uses_the_theme_selection_and_a_reserved_bar(self):
+        self.assertEqual(ACTIVE_TAB_CLASS, "active-tab")
+        self.assertIn("." + ACTIVE_TAB_CLASS, ACTIVE_TAB_CSS)
+        self.assertIn("@theme_selected_bg_color", ACTIVE_TAB_CSS)
+        self.assertIn("@theme_selected_fg_color", ACTIVE_TAB_CSS)
+        self.assertIn("border-color: transparent", ACTIVE_TAB_CSS)
+        self.assertIn("border-color: @theme_selected_bg_color", ACTIVE_TAB_CSS)
+        self.assertEqual(ACTIVE_TAB_CSS.count("border-width:"), 1)
+        self.assertIn("border-width: 0 0 3px 0", ACTIVE_TAB_CSS)
+        self.assertNotIn("#1c71d8", ACTIVE_TAB_CSS)
+        self.assertNotIn("font-weight", ACTIVE_TAB_CSS)
+        self.assertNotIn(":hover", ACTIVE_TAB_CSS)
 
 
 class LaunchPlanTests(unittest.TestCase):
