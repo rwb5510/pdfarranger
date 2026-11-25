@@ -89,7 +89,7 @@ else:
         pass
 
 APPNAME = 'PDF Arranger'
-VERSION = '1.14.0'
+VERSION = '1.15.0'
 WEBSITE = 'https://github.com/pdfarranger/pdfarranger'
 
 if os.name == 'nt':
@@ -317,6 +317,8 @@ def application_css() -> str:
 
 
 class PdfArranger(ApplicationBase):
+    VERSION = VERSION  # read by the About dialog in window.py
+
     # Drag and drop ID for pages coming from the same pdfarranger instance
     MODEL_ROW_INTERN = 1001
     # Drag and drop ID for pages coming from an other pdfarranger instance

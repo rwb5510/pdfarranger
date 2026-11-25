@@ -1057,7 +1057,7 @@ class ArrangerWindow:
             transient_for=self.window,
             modal=True,
             program_name=APPNAME,
-            version=getattr(self.app, 'VERSION', '1.14.0'),
+            version=getattr(self.app, 'VERSION', ''),
             comments=_(
                 "PDF Arranger is a small python-gtk application, which helps the "
                 "user to merge or split pdf documents and rotate, crop and rearrange "

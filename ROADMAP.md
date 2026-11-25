@@ -2,13 +2,13 @@
 
 This document outlines the project evolution, release history, and planned features for PDF Arranger.
 
-**Current Version:** `1.14.0` (Development: `1.15.0-dev` on `feature/tabbed-documents`)
+**Current Version:** `1.15.0`
 
 ---
 
 ## Project Evolution
 
-### v1.15.0 (In Development - Tabbed Documents)
+### v1.15.0 (2026-11-25 - Tabbed Documents)
 - **Tabbed Document Architecture:**
   - Single-process multi-document workflow replacing the legacy process-per-window model.
   - Integrated tab strip under the header bar displaying document title, dirty status indicator (`*`), and individual close buttons.
@@ -30,6 +30,10 @@ This document outlines the project evolution, release history, and planned featu
   - Independent undo/redo history, page queues, and find bar (`Ctrl+F`) query tracking per document.
   - Save Gate: Serialized save/export/print pipeline ensuring document safety and avoiding file corruption.
   - Coordinated close prompts with prompt-first ordering before performing batch saves and window closing.
+- **Fixes since the first tabbed build:**
+  - The active document tab is painted with the theme selection colors.
+  - Window size, maximized state, and zoom level are saved on exit and restored at the next start.
+  - On Windows, a launch that races a stale handoff port no longer deletes the running window's port, so later files keep opening as tabs.
 
 ### v1.14.0 (2026-05-23)
 - Metadata preservation improvements with pikepdf backend.
