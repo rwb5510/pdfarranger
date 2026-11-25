@@ -3,7 +3,7 @@ import ast
 import inspect
 import textwrap
 import unittest
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 import gi
@@ -140,6 +140,7 @@ class ClosePlanTests(unittest.TestCase):
         self.app.document_by_id = lambda doc_id: self.win.docs.get(doc_id)
         self.app.close_window = Mock()
         self.app.close_application = Mock()
+        self.app.remember_geometry = Mock()
         self.win.save_changes_dialog = Mock(return_value=3)
         self.docs = [self.win.focused_document()]
         second = document.Document(self.app, self.win.model.new_tab())
@@ -202,6 +203,53 @@ class ClosePlanTests(unittest.TestCase):
         self.assertFalse(self.win.close_window())
         self.assertEqual(self.started, [])
         self.app.close_window.assert_not_called()
+
+
+class GeometryTests(unittest.TestCase):
+    """Window size and zoom must be recorded before the windows are torn down."""
+
+    def setUp(self):
+        self.win = SimpleNamespace(
+            window=SimpleNamespace(get_size=lambda: (1200, 900), is_maximized=lambda: True, destroy=Mock()),
+            docs={},
+            tab_widgets={},
+            focused_document=lambda: SimpleNamespace(zoom_level=12.4),
+        )
+        self.app = SimpleNamespace(
+            windows=[self.win],
+            last_focused_window=self.win,
+            config=Mock(save_window_geometry=Mock(return_value=True)),
+            close_application=Mock(),
+        )
+        for name in ('active_window', 'remember_geometry', 'close_window', '_quit_without_prompts'):
+            setattr(self.app, name, MethodType(getattr(pdfarranger.PdfArranger, name), self.app))
+
+    def assert_recorded(self):
+        self.app.config.set_window_size.assert_called_once_with((1200, 900))
+        self.app.config.set_maximized.assert_called_once_with(True)
+        self.app.config.set_zoom_level.assert_called_once_with(12)
+
+    def test_quit_records_geometry(self):
+        self.app._quit_without_prompts()
+        self.assert_recorded()
+        self.app.close_application.assert_called_once()
+
+    def test_closing_last_window_records_geometry(self):
+        self.app.close_window(self.win)
+        self.assert_recorded()
+        self.app.close_application.assert_called_once()
+
+    def test_closing_other_window_records_nothing(self):
+        other = SimpleNamespace(window=SimpleNamespace(destroy=Mock()))
+        self.app.windows.append(other)
+        self.app.close_window(other)
+        self.app.config.set_window_size.assert_not_called()
+
+    def test_disabled_preference_records_nothing(self):
+        self.app.config.save_window_geometry.return_value = False
+        self.app._quit_without_prompts()
+        self.app.config.set_window_size.assert_not_called()
+        self.app.config.set_zoom_level.assert_not_called()
 
 
 if __name__ == '__main__':

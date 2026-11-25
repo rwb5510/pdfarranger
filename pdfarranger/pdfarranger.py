@@ -403,7 +403,24 @@ class PdfArranger(ApplicationBase):
                 return window.docs[doc_id]
         return None
 
+    def remember_geometry(self, window):
+        """Record the window size and the focused document's zoom in the config.
+
+        Call this before the window is destroyed: once it leaves self.windows
+        nothing at shutdown can measure it.
+        """
+        if not (window and getattr(window, 'window', None) and self.config
+                and self.config.save_window_geometry()):
+            return
+        self.config.set_window_size(window.window.get_size())
+        self.config.set_maximized(window.window.is_maximized())
+        focused = window.focused_document()
+        if focused and focused.zoom_level is not None:
+            self.config.set_zoom_level(round(focused.zoom_level))
+
     def close_window(self, window):
+        if self.windows == [window]:
+            self.remember_geometry(window)
         if window in self.windows:
             self.windows.remove(window)
         if getattr(window, 'window', None) and hasattr(window.window, 'destroy'):
@@ -666,6 +683,7 @@ class PdfArranger(ApplicationBase):
         save_documents_then([doc for win, doc in save_plan], self._quit_without_prompts)
 
     def _quit_without_prompts(self):
+        self.remember_geometry(self.active_window())
         for win in list(self.windows):
             for doc in list(win.docs.values()):
                 if hasattr(doc, 'destroy'):
@@ -708,13 +726,9 @@ class PdfArranger(ApplicationBase):
                         doc.iconview.get_model().clear()
                 doc.pdfqueue.clear()
         gc.collect()
-        active = self.active_window()
-        if active and active.window and self.config and self.config.save_window_geometry():
-            self.config.set_window_size(active.window.get_size())
-            self.config.set_maximized(active.window.is_maximized())
-            focused = active.focused_document()
-            if focused and focused.zoom_level is not None:
-                self.config.set_zoom_level(round(focused.zoom_level))
+        # Windows still open here only on paths that skip close_window and
+        # _quit_without_prompts, such as Ctrl+C.
+        self.remember_geometry(self.active_window())
         if self.config:
             self.config.save()
         if os.path.isdir(self.tmp_dir):
