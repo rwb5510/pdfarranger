@@ -223,13 +223,13 @@ See file COPYING or go to <http://www.gnu.org/licenses/> for full license detail
   </developer>
   <screenshots>
     <screenshot type="default">
-      <image>https://github.com/pdfarranger/pdfarranger/raw/main/data/screenshot-side-by-side.png</image>
+      <image>https://github.com/rwb5510/pdfarranger/raw/main/data/screenshot-side-by-side.png</image>
       <caption>
         Side-by-side two-pane view with focused pane outline.
       </caption>
     </screenshot>
     <screenshot>
-      <image>https://github.com/pdfarranger/pdfarranger/raw/main/data/screenshot-tabs.png</image>
+      <image>https://github.com/rwb5510/pdfarranger/raw/main/data/screenshot-tabs.png</image>
       <caption>
         Tabbed documents in a single window with independent search.
       </caption>

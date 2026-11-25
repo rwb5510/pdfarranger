@@ -252,5 +252,34 @@ class GeometryTests(unittest.TestCase):
         self.app.config.set_zoom_level.assert_not_called()
 
 
+class ContentLossNoteTests(unittest.TestCase):
+    """The first window shows the limitations note once, as upstream 1.14.0 did."""
+
+    def activate(self, enabled, windows=()):
+        doc = Mock()
+        win = SimpleNamespace(show=Mock(), present=Mock(), focused_document=lambda: doc)
+        app = SimpleNamespace(
+            windows=list(windows),
+            config=SimpleNamespace(content_loss_warning=lambda: enabled),
+            new_window=lambda: win,
+            active_window=lambda: app.windows[0] if app.windows else None,
+        )
+        with patch.object(pdfarranger, 'Gtk', None), patch.object(pdfarranger, 'GObject', None), \
+                patch.object(pdfarranger, 'GLib', SimpleNamespace()):
+            pdfarranger.PdfArranger.do_activate(app)
+        return doc
+
+    def test_first_window_shows_the_note(self):
+        self.activate(True).content_loss_warning.assert_called_once_with()
+
+    def test_note_is_skipped_when_disabled(self):
+        self.activate(False).content_loss_warning.assert_not_called()
+
+    def test_raising_an_existing_window_does_not_show_it_again(self):
+        existing = SimpleNamespace(present=Mock())
+        self.activate(True, windows=[existing]).content_loss_warning.assert_not_called()
+        existing.present.assert_called_once_with()
+
+
 if __name__ == '__main__':
     unittest.main()

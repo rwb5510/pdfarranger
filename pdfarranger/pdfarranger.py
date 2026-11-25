@@ -545,6 +545,10 @@ class PdfArranger(ApplicationBase):
 
         window = self.new_window()
         window.show()
+        if self.config and self.config.content_loss_warning():
+            document = window.focused_document()
+            if document:
+                document.content_loss_warning()
 
     @staticmethod
     def get_os_version():
