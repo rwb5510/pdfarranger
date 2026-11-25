@@ -980,12 +980,78 @@ class Win32HandoffTests(unittest.TestCase):
             self.assertFalse(Win32Handoff.submit(["missing.pdf"], directory=tmpdir))
 
     def test_stale_lock_file_cleaned_up_on_failed_connect(self):
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
         with tempfile.TemporaryDirectory() as tmpdir:
             lock_file = os.path.join(tmpdir, "instance.port")
             with open(lock_file, "w", encoding="utf-8") as f:
                 f.write("127.0.0.1:59999\n")
-            self.assertFalse(Win32Handoff.submit(["doc.pdf"], directory=tmpdir))
+            self.assertFalse(Win32Handoff.submit(["doc.pdf"], directory=tmpdir, mutex_name=name))
             self.assertFalse(os.path.exists(lock_file))
+
+    def test_failed_connect_keeps_a_port_file_rewritten_meanwhile(self):
+        # A refused connect takes about 2 s on Windows. If the new owner
+        # replaces the stale port file in that time, the file must survive.
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_file = os.path.join(tmpdir, "instance.port")
+            with open(lock_file, "w", encoding="utf-8") as f:
+                f.write("127.0.0.1:59999\n")
+
+            class SlowRefusedSocket:
+                def __init__(self, *args):
+                    pass
+
+                def settimeout(self, timeout):
+                    pass
+
+                def connect(self, address):
+                    with open(lock_file, "w", encoding="utf-8") as f:
+                        f.write("127.0.0.1:60000\n")
+                    raise ConnectionRefusedError
+
+                def close(self):
+                    pass
+
+            with patch("pdfarranger.win32ipc.socket.socket", SlowRefusedSocket):
+                self.assertFalse(Win32Handoff.submit(["doc.pdf"], directory=tmpdir, mutex_name=name))
+            with open(lock_file, encoding="utf-8") as f:
+                self.assertEqual(f.read().strip(), "127.0.0.1:60000")
+
+    def test_failed_connect_keeps_the_port_file_while_an_owner_holds_the_claim(self):
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
+        with tempfile.TemporaryDirectory() as tmpdir:
+            owner = Win32Handoff(directory=tmpdir, mutex_name=name)
+            try:
+                self.assertTrue(owner.claim())
+                lock_file = os.path.join(tmpdir, "instance.port")
+                with open(lock_file, "w", encoding="utf-8") as f:
+                    f.write("127.0.0.1:59999\n")
+                self.assertFalse(Win32Handoff.submit(["doc.pdf"], directory=tmpdir, mutex_name=name))
+                self.assertTrue(os.path.exists(lock_file))
+            finally:
+                owner.stop()
+
+    def test_stop_leaves_a_port_file_another_owner_wrote(self):
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
+        with tempfile.TemporaryDirectory() as tmpdir:
+            owner = Win32Handoff(directory=tmpdir, mutex_name=name)
+            self.assertTrue(owner.claim())
+            owner.start()
+            lock_file = os.path.join(tmpdir, "instance.port")
+            with open(lock_file, "w", encoding="utf-8") as f:
+                f.write("127.0.0.1:60000\n")
+            owner.stop()
+            with open(lock_file, encoding="utf-8") as f:
+                self.assertEqual(f.read().strip(), "127.0.0.1:60000")
+
+    def test_stop_removes_its_own_port_file(self):
+        name = "Local\\pdfarranger-test-" + uuid.uuid4().hex
+        with tempfile.TemporaryDirectory() as tmpdir:
+            owner = Win32Handoff(directory=tmpdir, mutex_name=name)
+            self.assertTrue(owner.claim())
+            owner.start()
+            owner.stop()
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "instance.port")))
 
     def test_only_one_launch_claims_the_instance(self):
         name = "Local\\pdfarranger-test-" + uuid.uuid4().hex

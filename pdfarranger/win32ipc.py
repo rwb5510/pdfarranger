@@ -144,7 +144,29 @@ def gtk_unique_is_enough() -> bool:
     return os.name != "nt"
 
 
-def _submit_once(files: list, directory: str, keep_port_on_failure: bool) -> bool:
+def _remove_port_file(lock_file: str, expected: str) -> None:
+    """Delete the port file only while it still holds `expected`.
+
+    Another process may have replaced the file since it was read: a
+    refused connect takes about two seconds on Windows, long enough for a
+    new owner to claim the instance and write its own port.
+    """
+    try:
+        with open(lock_file, "r", encoding="utf-8") as f:
+            if f.read().strip() != expected:
+                return
+        os.remove(lock_file)
+    except OSError:
+        pass
+
+
+def _discard_stale_port(lock_file: str, content: str, mutex_name: str, directory: str) -> None:
+    # While some process holds the claim, the port file is its own, or soon will be.
+    if not claim_is_held(mutex_name, directory):
+        _remove_port_file(lock_file, content)
+
+
+def _submit_once(files: list, directory: str, mutex_name: str) -> bool:
     lock_file = os.path.join(directory, "instance.port")
     if not os.path.exists(lock_file):
         return False
@@ -155,22 +177,14 @@ def _submit_once(files: list, directory: str, keep_port_on_failure: bool) -> boo
         return False
 
     if not content or ":" not in content:
-        if not keep_port_on_failure:
-            try:
-                os.remove(lock_file)
-            except OSError:
-                pass
+        _discard_stale_port(lock_file, content, mutex_name, directory)
         return False
 
     host, port_str = content.split(":", 1)
     try:
         port = int(port_str)
     except ValueError:
-        if not keep_port_on_failure:
-            try:
-                os.remove(lock_file)
-            except OSError:
-                pass
+        _discard_stale_port(lock_file, content, mutex_name, directory)
         return False
 
     delivered = False
@@ -189,11 +203,7 @@ def _submit_once(files: list, directory: str, keep_port_on_failure: bool) -> boo
             pass
         delivered = True
     except (ConnectionRefusedError, socket.timeout, OSError):
-        if not keep_port_on_failure:
-            try:
-                os.remove(lock_file)
-            except OSError:
-                pass
+        _discard_stale_port(lock_file, content, mutex_name, directory)
     finally:
         try:
             s.close()
@@ -210,8 +220,7 @@ def _do_submit(files: list, directory: str | None = None, wait: float = 0.0,
         mutex_name = DEFAULT_MUTEX_NAME
     deadline = time.monotonic() + max(0.0, wait)
     while True:
-        keep_port = wait > 0 and claim_is_held(mutex_name, directory)
-        if _submit_once(files, directory, keep_port):
+        if _submit_once(files, directory, mutex_name):
             return True
         if wait <= 0 or not claim_is_held(mutex_name, directory):
             return False
@@ -251,6 +260,7 @@ class Win32Handoff:
         self._last_client_thread = None
         self._stopping = threading.Event()
         self._lock_file = os.path.join(self.directory, "instance.port")
+        self._port_line = None
         self._mutex_handle = None
         self._owner_fd = None
         self._claimed = False
@@ -308,9 +318,10 @@ class Win32Handoff:
         self._server_sock.bind(("127.0.0.1", 0))
         self._server_sock.listen(5)
         host, port = self._server_sock.getsockname()[:2]
+        self._port_line = f"{host}:{port}"
         os.makedirs(self.directory, exist_ok=True)
         with open(self._lock_file, "w", encoding="utf-8") as f:
-            f.write(f"{host}:{port}\n")
+            f.write(self._port_line + "\n")
         self._stopping.clear()
         self._thread = threading.Thread(target=self._listen, daemon=True)
         self._thread.start()
@@ -368,17 +379,17 @@ class Win32Handoff:
 
     def stop(self) -> None:
         self._stopping.set()
-        self._release_claim()
         if self._server_sock:
             try:
                 self._server_sock.close()
             except Exception:
                 pass
             self._server_sock = None
-        if os.path.exists(self._lock_file):
-            try:
-                os.remove(self._lock_file)
-            except OSError:
-                pass
+        # Remove our port before releasing the claim, so the next owner's
+        # port file is never the one deleted.
+        if self._port_line is not None:
+            _remove_port_file(self._lock_file, self._port_line)
+            self._port_line = None
+        self._release_claim()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
