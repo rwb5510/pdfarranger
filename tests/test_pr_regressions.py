@@ -252,6 +252,26 @@ class GeometryTests(unittest.TestCase):
         self.app.config.set_zoom_level.assert_not_called()
 
 
+class DocumentCoreNamesTests(unittest.TestCase):
+    """Page code moved from pdfarranger.py to document.py without its core imports."""
+
+    def test_document_imports_the_core_helpers_it_uses(self):
+        for name in ('Dims', 'Sides', '_img_to_pdf'):
+            self.assertTrue(callable(getattr(document, name, None)), name)
+
+    def test_crop_sets_the_page_crop(self):
+        from gi.repository import Gtk
+        page = SimpleNamespace(crop=document.Sides() if hasattr(document, 'Sides') else None,
+                               find_rectangles=[], resample=1)
+        model = Gtk.ListStore(object)
+        model.append([page])
+        doc = SimpleNamespace(iconview=SimpleNamespace(get_model=lambda: model),
+                              update_iconview_geometry=Mock())
+        changed = document.Document.crop(doc, [Gtk.TreePath(0)], [(0.1, 0.2, 0.3, 0.4)])
+        self.assertTrue(changed)
+        self.assertEqual(tuple(model[0][0].crop), (0.1, 0.2, 0.3, 0.4))
+
+
 class ContentLossNoteTests(unittest.TestCase):
     """The first window shows the limitations note once, as upstream 1.14.0 did."""
 

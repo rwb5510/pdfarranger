@@ -42,6 +42,7 @@ try:
     from . import splitter
     from .iconview import CellRendererImage, IconviewCursor, IconviewDragSelect, IconviewPanView
     from .core import img2pdf_supported_img, PageAdder, PDFDocError, PDFRenderer
+    from .core import Dims, Sides, _img_to_pdf
     try:
         from .image_exporter import ImageExporter
     except (ImportError, ValueError):
@@ -66,6 +67,9 @@ except (ImportError, ValueError):
     PageAdder = None
     PDFDocError = Exception
     PDFRenderer = None
+    Dims = None
+    Sides = None
+    _img_to_pdf = None
     ImageExporter = None
 
 from .session import document_occupied
